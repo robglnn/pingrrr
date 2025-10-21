@@ -11,10 +11,62 @@ build/
 DerivedData/
 *.ipa
 *.app.dSYM.zip
+*.dSYM
 
 # Dependencies
 .DS_Store
 Pods/
 *.lock
 Carthage/
-pingrrr/GoogleService-Info.plist
+
+# Environment & Config Files
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+.env.staging
+*.local
+Config.xcconfig
+Secrets.xcconfig
+APIKeys.xcconfig
+
+# Firebase & Google Services
+**/GoogleService-Info.plist
+GoogleService-Info-*.plist
+
+# API Keys & Secrets
+Secrets.swift
+APIKeys.swift
+Keys.swift
+Config.swift
+**/secrets/
+**/keys/
+
+# Certificates & Provisioning Profiles
+*.p12
+*.mobileprovision
+*.cer
+*.certSigningRequest
+
+# Fastlane (CI/CD)
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+fastlane/.env*
+fastlane/README.md
+
+# SwiftPM
+.swiftpm/
+.build/
+*.xcodeproj/*.resolved
+
+# Testing
+*.gcda
+*.gcno
+
+# Misc
+xcuserdata/
+*.moved-aside
+*.perspectivev3

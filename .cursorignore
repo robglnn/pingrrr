@@ -9,6 +9,7 @@ build/
 DerivedData/
 *.ipa
 *.app.dSYM.zip
+*.dSYM
 
 # Ignore dependency artifacts and macOS metadata
 .DS_Store
@@ -16,3 +17,47 @@ Pods/
 *.lock
 Carthage/
 
+# Environment & Config Files
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+.env.staging
+*.local
+Config.xcconfig
+Secrets.xcconfig
+APIKeys.xcconfig
+
+# Firebase & Google Services
+**/GoogleService-Info.plist
+GoogleService-Info-*.plist
+
+# API Keys & Secrets
+Secrets.swift
+APIKeys.swift
+Keys.swift
+Config.swift
+**/secrets/
+**/keys/
+
+# Certificates & Provisioning Profiles
+*.p12
+*.mobileprovision
+*.cer
+*.certSigningRequest
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+fastlane/test_output
+fastlane/.env*
+
+# SwiftPM
+.swiftpm/
+.build/
+
+# Testing
+*.gcda
+*.gcno
