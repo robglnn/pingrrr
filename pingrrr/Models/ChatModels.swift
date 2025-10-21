@@ -109,7 +109,7 @@ final class ConversationEntity {
         set { participantIDsString = ConversationEntity.encodeIDs(newValue) }
     }
 
-    private static func encodeIDs(_ ids: [String]) -> String {
+    static func encodeIDs(_ ids: [String]) -> String {
         guard let data = try? JSONEncoder().encode(ids),
               let string = String(data: data, encoding: .utf8) else {
             return "[]"
@@ -117,7 +117,7 @@ final class ConversationEntity {
         return string
     }
 
-    private static func decodeIDs(_ string: String) -> [String] {
+    static func decodeIDs(_ string: String) -> [String] {
         guard let data = string.data(using: .utf8),
               let ids = try? JSONDecoder().decode([String].self, from: data) else {
             return []
@@ -183,7 +183,7 @@ final class MessageEntity {
         set { readByString = MessageEntity.encodeIDs(newValue) }
     }
 
-    private static func encodeIDs(_ ids: [String]) -> String {
+    static func encodeIDs(_ ids: [String]) -> String {
         guard let data = try? JSONEncoder().encode(ids),
               let string = String(data: data, encoding: .utf8) else {
             return "[]"
@@ -191,7 +191,7 @@ final class MessageEntity {
         return string
     }
 
-    private static func decodeIDs(_ string: String) -> [String] {
+    static func decodeIDs(_ string: String) -> [String] {
         guard let data = string.data(using: .utf8),
               let ids = try? JSONDecoder().decode([String].self, from: data) else {
             return []

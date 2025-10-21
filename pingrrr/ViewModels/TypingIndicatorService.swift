@@ -43,11 +43,15 @@ final class TypingIndicatorService {
         debounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard let self, !Task.isCancelled else { return }
-            try? await self.updateTypingStatus(
-                conversationID: conversationID,
-                userID: currentUserID,
-                isTyping: isTyping
-            )
+            do {
+                try await self.updateTypingStatus(
+                    conversationID: conversationID,
+                    userID: currentUserID,
+                    isTyping: isTyping
+                )
+            } catch {
+                print("[TypingIndicator] Failed to update typing state: \(error)")
+            }
         }
     }
 

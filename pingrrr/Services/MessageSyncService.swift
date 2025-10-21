@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import FirebaseFirestore
+import FirebaseFirestoreSwift
 
 @MainActor
 final class MessageSyncService {
@@ -74,7 +75,7 @@ final class MessageSyncService {
                 let record = try change.document.data(as: MessageRecord.self)
                 switch change.type {
                 case .added, .modified:
-                    upsert(record, in: modelContext)
+                    upsert(record, changeType: change.type, isInitialLoad: false, in: modelContext)
                 case .removed:
                     remove(recordID: record.id, in: modelContext)
                 }
@@ -91,14 +92,19 @@ final class MessageSyncService {
 
         for document in documents {
             let record = try document.data(as: MessageRecord.self)
-            upsert(record, in: modelContext)
+            upsert(record, changeType: nil, isInitialLoad: true, in: modelContext)
         }
 
         try modelContext.save()
         onChange?()
     }
 
-    private func upsert(_ record: MessageRecord, in context: ModelContext) {
+    private func upsert(
+        _ record: MessageRecord,
+        changeType: DocumentChangeType?,
+        isInitialLoad: Bool,
+        in context: ModelContext
+    ) {
         guard let identifier = record.id else { return }
 
         let descriptor = FetchDescriptor<MessageEntity>(
@@ -150,6 +156,8 @@ final class MessageSyncService {
         }
 
         entity.isLocalOnly = false
+
+        updateConversationMetadata(with: record, changeType: changeType, isInitialLoad: isInitialLoad, in: context)
     }
 
     private func remove(recordID: String?, in context: ModelContext) {
@@ -161,10 +169,46 @@ final class MessageSyncService {
             context.delete(entity)
         }
     }
+
+    private func updateConversationMetadata(
+        with record: MessageRecord,
+        changeType: DocumentChangeType?,
+        isInitialLoad: Bool,
+        in context: ModelContext
+    ) {
+        guard let conversationID = record.conversationID ?? conversationID else { return }
+
+        let descriptor = FetchDescriptor<ConversationEntity>(
+            predicate: #Predicate { $0.id == conversationID },
+            fetchLimit: 1
+        )
+
+        guard let conversation = try? context.fetch(descriptor).first else { return }
+
+        if let content = record.content {
+            conversation.lastMessagePreview = content
+        }
+        if let timestamp = record.timestamp {
+            conversation.lastMessageTimestamp = timestamp
+        }
+
+        guard !isInitialLoad else { return }
+
+        if changeType == .added,
+           let senderID = record.senderID,
+           let currentUserID = currentUserID {
+            if senderID == currentUserID {
+                conversation.unreadCount = record.unreadCounts?[currentUserID] ?? 0
+            } else {
+                let currentUnread = record.unreadCounts?[currentUserID] ?? conversation.unreadCount
+                conversation.unreadCount = currentUnread
+            }
+        }
+    }
 }
 
 private struct MessageRecord: Codable {
-    var id: String?
+    @DocumentID var id: String?
     var conversationID: String?
     var senderID: String?
     var content: String?

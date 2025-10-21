@@ -14,7 +14,7 @@ struct ChatView: View {
         self.conversation = conversation
         self.currentUserID = currentUserID
         _viewModel = StateObject(wrappedValue: ChatViewModel(
-            conversationID: conversation.id,
+            conversation: conversation,
             currentUserID: currentUserID,
             modelContext: modelContext,
             appServices: appServices

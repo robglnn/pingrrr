@@ -11,24 +11,27 @@ final class ChatViewModel: ObservableObject {
 
     @Published var draftMessage: String = ""
 
-    private let conversationID: String
-    private let currentUserID: String
     private let appServices: AppServices
     private let messageSyncService = MessageSyncService()
     private let typingIndicatorService = TypingIndicatorService()
     private let modelContext: ModelContext
+    private let conversationID: String
+    private let currentUserID: String
+    private var conversation: ConversationEntity?
 
     init(
-        conversationID: String,
+        conversation: ConversationEntity,
         currentUserID: String,
         modelContext: ModelContext,
         appServices: AppServices
     ) {
-        self.conversationID = conversationID
+        self.conversationID = conversation.id
         self.currentUserID = currentUserID
         self.modelContext = modelContext
         self.appServices = appServices
+        self.conversation = conversation
         loadCachedMessages()
+        refreshConversationReference()
     }
 
     func start() {
@@ -44,7 +47,8 @@ final class ChatViewModel: ObservableObject {
             conversationID: conversationID,
             currentUserID: currentUserID
         ) { [weak self] usersTyping in
-            self?.isTyping = !usersTyping.filter { $0 != self?.currentUserID }.isEmpty
+            guard let self else { return }
+            self.isTyping = !usersTyping.filter { $0 != self.currentUserID }.isEmpty
         }
     }
 
@@ -78,6 +82,8 @@ final class ChatViewModel: ObservableObject {
         modelContext.insert(optimisticMessage)
         messages.append(optimisticMessage)
         draftMessage = ""
+
+        updateConversationForOutgoingMessage(content: trimmed, timestamp: now, messageID: tempID)
 
         let messageData: [String: Any] = [
             "id": tempID,
@@ -158,6 +164,9 @@ final class ChatViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+
+        conversation?.unreadCount = 0
+        try? modelContext.save()
     }
 
     func userStartedTyping() {
@@ -174,6 +183,26 @@ final class ChatViewModel: ObservableObject {
             sortBy: [SortDescriptor(\.timestamp, order: .forward)]
         )
         messages = (try? modelContext.fetch(descriptor)) ?? []
+        refreshConversationReference()
+    }
+
+    private func refreshConversationReference() {
+        let descriptor = FetchDescriptor<ConversationEntity>(
+            predicate: #Predicate { $0.id == conversationID },
+            fetchLimit: 1
+        )
+        if let fetched = try? modelContext.fetch(descriptor).first {
+            conversation = fetched
+        }
+    }
+
+    private func updateConversationForOutgoingMessage(content: String, timestamp: Date, messageID: String) {
+        guard let conversation else { return }
+        conversation.lastMessagePreview = content
+        conversation.lastMessageTimestamp = timestamp
+        conversation.lastMessageID = messageID
+        conversation.unreadCount = 0
+        try? modelContext.save()
     }
 }
 
