@@ -16,6 +16,18 @@ enum SessionEvent {
 final class AuthService {
     private var handle: AuthStateDidChangeListenerHandle?
 
+    var currentUserID: String? {
+        Auth.auth().currentUser?.uid
+    }
+
+    var currentUserEmail: String? {
+        Auth.auth().currentUser?.email
+    }
+
+    var currentUserDisplayName: String? {
+        Auth.auth().currentUser?.displayName
+    }
+
     func startListening(_ handler: @escaping (SessionEvent) -> Void) {
         if let handle {
             Auth.auth().removeStateDidChangeListener(handle)
@@ -48,6 +60,10 @@ final class AuthService {
         let request = result.user.createProfileChangeRequest()
         request.displayName = displayName
         try await request.commitChanges()
+    }
+
+    func reloadCurrentUser() async throws {
+        try await Auth.auth().currentUser?.reload()
     }
 }
 

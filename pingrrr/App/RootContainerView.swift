@@ -11,7 +11,7 @@ struct RootContainerView: View {
     var body: some View {
         Group {
             if appServices.sessionState == .authenticated {
-                Text("ConversationsView placeholder")
+                ConversationsView(appServices: appServices)
             } else {
                 AuthenticationFlowView(appServices: appServices)
             }
