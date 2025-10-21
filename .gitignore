@@ -1,0 +1,20 @@
+# Xcode
+*.xcuserstate
+*.xcworkspace
+*.xcodeproj/project.xcworkspace
+*.xcodeproj/xcuserdata
+*.xcodeproj/project.pbxproj/*.backup
+*.xcodeproj/*.pbxproj
+
+# Build
+build/
+DerivedData/
+*.ipa
+*.app.dSYM.zip
+
+# Dependencies
+.DS_Store
+Pods/
+*.lock
+Carthage/
+pingrrr/GoogleService-Info.plist
