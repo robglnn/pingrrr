@@ -124,7 +124,9 @@ final class MessageSyncService {
                 timestamp: record.timestamp ?? Date(),
                 status: record.status ?? .sent,
                 readBy: record.readBy ?? [],
-                isLocalOnly: false
+                isLocalOnly: false,
+                retryCount: 0,
+                nextRetryTimestamp: nil
             )
             context.insert(entity)
         }
@@ -156,6 +158,8 @@ final class MessageSyncService {
         }
 
         entity.isLocalOnly = false
+        entity.retryCount = 0
+        entity.nextRetryTimestamp = nil
 
         updateConversationMetadata(with: record, changeType: changeType, isInitialLoad: isInitialLoad, in: context)
     }
@@ -195,14 +199,9 @@ final class MessageSyncService {
         guard !isInitialLoad else { return }
 
         if changeType == .added,
-           let senderID = record.senderID,
-           let currentUserID = currentUserID {
-            if senderID == currentUserID {
-                conversation.unreadCount = record.unreadCounts?[currentUserID] ?? 0
-            } else {
-                let currentUnread = record.unreadCounts?[currentUserID] ?? conversation.unreadCount
-                conversation.unreadCount = currentUnread
-            }
+           let currentUserID = currentUserID,
+           let unreadCounts = record.unreadCounts {
+            conversation.unreadCount = unreadCounts[currentUserID] ?? conversation.unreadCount
         }
     }
 }
@@ -216,6 +215,7 @@ private struct MessageRecord: Codable {
     var timestamp: Date?
     var status: MessageStatus?
     var readBy: [String]?
+    var unreadCounts: [String: Int]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -226,6 +226,7 @@ private struct MessageRecord: Codable {
         case timestamp
         case status
         case readBy
+        case unreadCounts
     }
 
     init(
@@ -236,7 +237,8 @@ private struct MessageRecord: Codable {
         translatedContent: String? = nil,
         timestamp: Date? = nil,
         status: MessageStatus? = nil,
-        readBy: [String]? = nil
+        readBy: [String]? = nil,
+        unreadCounts: [String: Int]? = nil
     ) {
         self.id = id
         self.conversationID = conversationID
@@ -246,6 +248,9 @@ private struct MessageRecord: Codable {
         self.timestamp = timestamp
         self.status = status
         self.readBy = readBy
+        self.unreadCounts = unreadCounts
     }
 }
 
+        }
+    }

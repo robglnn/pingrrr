@@ -23,6 +23,7 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            header
             messagesList
             typingIndicator
             inputBar
@@ -48,6 +49,55 @@ struct ChatView: View {
         }
         .onAppear {
             Task { await viewModel.markMessagesAsRead() }
+        }
+    }
+
+    private var header: some View {
+        VStack(spacing: 6) {
+            HStack {
+                Text(conversation.title ?? "Chat")
+                    .font(.title3.bold())
+                    .foregroundStyle(.white)
+
+                Spacer()
+
+                presenceIndicator
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+
+            Divider()
+                .overlay(Color.white.opacity(0.1))
+        }
+        .background(Color.black.opacity(0.95))
+    }
+
+    private var presenceIndicator: some View {
+        Group {
+            if let snapshot = viewModel.presenceSnapshot {
+                if snapshot.isOnline {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                        Text("Online")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if let lastSeen = snapshot.lastSeen {
+                    Text("Last seen \(Formatter.relativeDateFormatter.localizedString(for: lastSeen, relativeTo: Date()))")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Offline")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Connecting...")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

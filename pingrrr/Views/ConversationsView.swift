@@ -45,7 +45,10 @@ struct ConversationsView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             } label: {
-                                ConversationRow(conversation: conversation)
+                                ConversationRow(
+                                    conversation: conversation,
+                                    presence: presenceData(for: conversation)
+                                )
                             }
                             .listRowBackground(Color.clear)
                         }
@@ -108,6 +111,7 @@ struct ConversationsView: View {
 
 private struct ConversationRow: View {
     let conversation: ConversationEntity
+    let presence: ConversationsViewModel.PresenceViewData
 
     @State private var participantDisplayNames: [String] = []
 
@@ -120,6 +124,16 @@ private struct ConversationRow: View {
                     Text(title)
                         .font(.headline)
                         .foregroundStyle(.white)
+
+                    if presence.isOnline {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 10, height: 10)
+                    } else if let lastSeen = presence.lastSeen {
+                        Text("Last seen \(Formatter.relativeDateFormatter.localizedString(for: lastSeen, relativeTo: Date()))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
 
                     Spacer()
 
@@ -178,5 +192,14 @@ private enum Formatter {
         formatter.unitsStyle = .short
         return formatter
     }()
+}
+
+private extension ConversationsView {
+    func presenceData(for conversation: ConversationEntity) -> ConversationsViewModel.PresenceViewData {
+        guard let currentUserID = appServices.authService.currentUserID else {
+            return ConversationsViewModel.PresenceViewData(isOnline: false, lastSeen: nil)
+        }
+        return viewModel.presenceState(for: conversation, currentUserID: currentUserID)
+    }
 }
 

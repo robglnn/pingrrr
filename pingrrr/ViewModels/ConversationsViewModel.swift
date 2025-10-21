@@ -12,10 +12,14 @@ final class ConversationsViewModel: ObservableObject {
     private let modelContext: ModelContext
     private let appServices: AppServices
     private let syncService = ConversationsSyncService()
+    private let presenceService: PresenceService
+
+    private var observedPresenceIDs: Set<String> = []
 
     init(modelContext: ModelContext, appServices: AppServices) {
         self.modelContext = modelContext
         self.appServices = appServices
+        self.presenceService = appServices.presenceService
         refreshLocalItems()
     }
 
@@ -35,6 +39,8 @@ final class ConversationsViewModel: ObservableObject {
 
     func stop() {
         syncService.stop()
+        presenceService.removeAllObservers()
+        observedPresenceIDs.removeAll()
     }
 
     func markConversationAsRead(_ conversation: ConversationEntity) async {
@@ -59,7 +65,56 @@ final class ConversationsViewModel: ObservableObject {
         )
         if let fetched = try? modelContext.fetch(descriptor) {
             items = fetched
+            updatePresenceObservers()
         }
+    }
+
+    private func updatePresenceObservers() {
+        guard let currentUserID = appServices.authService.currentUserID else { return }
+        let participantIDs = items
+            .flatMap { $0.participantIDs }
+            .filter { $0 != currentUserID }
+        let uniqueIDs = Set(participantIDs)
+
+        let toRemove = observedPresenceIDs.subtracting(uniqueIDs)
+        toRemove.forEach { presenceService.removeObserver(for: $0) }
+
+        let toAdd = uniqueIDs.subtracting(observedPresenceIDs)
+        presenceService.observe(userIDs: Array(toAdd))
+
+        observedPresenceIDs = uniqueIDs
+    }
+
+    func presenceState(for conversation: ConversationEntity, currentUserID: String) -> PresenceViewData {
+        let otherParticipants = conversation.participantIDs.filter { $0 != currentUserID }
+        guard !otherParticipants.isEmpty else {
+            return PresenceViewData(isOnline: false, lastSeen: nil)
+        }
+
+        var isOnline = false
+        var latestSeen: Date?
+
+        for participant in otherParticipants {
+            guard let snapshot = presenceService.snapshot(for: participant) else { continue }
+            if snapshot.isOnline {
+                isOnline = true
+            }
+
+            if let lastSeen = snapshot.lastSeen {
+                if latestSeen == nil || lastSeen > latestSeen! {
+                    latestSeen = lastSeen
+                }
+            }
+        }
+
+        return PresenceViewData(isOnline: isOnline, lastSeen: latestSeen)
+    }
+}
+
+extension ConversationsViewModel {
+    struct PresenceViewData {
+        let isOnline: Bool
+        let lastSeen: Date?
     }
 }
 

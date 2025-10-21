@@ -18,6 +18,13 @@ final class ChatViewModel: ObservableObject {
     private let conversationID: String
     private let currentUserID: String
     private var conversation: ConversationEntity?
+    private var outgoingQueue: OutgoingMessageQueue {
+        appServices.outgoingMessageQueue
+    }
+    private var presenceService: PresenceService {
+        appServices.presenceService
+    }
+    @Published private(set) var presenceSnapshot: PresenceService.Snapshot?
 
     init(
         conversation: ConversationEntity,
@@ -50,11 +57,14 @@ final class ChatViewModel: ObservableObject {
             guard let self else { return }
             self.isTyping = !usersTyping.filter { $0 != self.currentUserID }.isEmpty
         }
+
+        observePresence()
     }
 
     func stop() {
         messageSyncService.stop()
         typingIndicatorService.stop()
+        removePresenceObservers()
     }
 
     func refresh() async {
@@ -76,7 +86,9 @@ final class ChatViewModel: ObservableObject {
             timestamp: now,
             status: .sending,
             readBy: [currentUserID],
-            isLocalOnly: true
+            isLocalOnly: true,
+            retryCount: 0,
+            nextRetryTimestamp: nil
         )
 
         modelContext.insert(optimisticMessage)
@@ -105,15 +117,22 @@ final class ChatViewModel: ObservableObject {
             try await docRef.setData(messageData)
             optimisticMessage.status = .sent
             optimisticMessage.isLocalOnly = false
+            optimisticMessage.retryCount = 0
+            optimisticMessage.nextRetryTimestamp = nil
             try modelContext.save()
         } catch {
-            optimisticMessage.status = .failed
             errorMessage = error.localizedDescription
+            outgoingQueue.enqueueRetry(for: optimisticMessage)
         }
     }
 
     func retrySendingMessage(_ message: MessageEntity) async {
-        guard message.status == .failed else { return }
+        guard message.status == .failed || message.isLocalOnly else { return }
+        outgoingQueue.enqueueRetry(for: message)
+        await resend(message)
+    }
+
+    private func resend(_ message: MessageEntity) async {
         let docRef = Firestore.firestore()
             .collection("conversations")
             .document(conversationID)
@@ -134,9 +153,12 @@ final class ChatViewModel: ObservableObject {
             try await docRef.setData(data)
             message.status = .sent
             message.isLocalOnly = false
+            message.retryCount = 0
+            message.nextRetryTimestamp = nil
             try modelContext.save()
         } catch {
             errorMessage = error.localizedDescription
+            outgoingQueue.enqueueRetry(for: message)
         }
     }
 
@@ -193,6 +215,7 @@ final class ChatViewModel: ObservableObject {
         )
         if let fetched = try? modelContext.fetch(descriptor).first {
             conversation = fetched
+            observePresence()
         }
     }
 
@@ -203,6 +226,48 @@ final class ChatViewModel: ObservableObject {
         conversation.lastMessageID = messageID
         conversation.unreadCount = 0
         try? modelContext.save()
+    }
+
+    private func observePresence() {
+        guard let conversation else { return }
+        let participants = conversation.participantIDs.filter { $0 != currentUserID }
+        guard !participants.isEmpty else {
+            presenceSnapshot = nil
+            removePresenceObservers()
+            return
+        }
+
+        presenceService.observe(userIDs: participants)
+        presenceSnapshot = presenceSnapshot(for: participants)
+    }
+
+    private func presenceSnapshot(for participants: [String]) -> PresenceService.Snapshot? {
+        guard !participants.isEmpty else { return nil }
+
+        var latestSnapshot: PresenceService.Snapshot?
+        for participant in participants {
+            guard let snapshot = presenceService.snapshot(for: participant) else { continue }
+            if snapshot.isOnline {
+                return PresenceService.Snapshot(isOnline: true, lastSeen: snapshot.lastSeen)
+            }
+
+            if let lastSeen = snapshot.lastSeen {
+                if latestSnapshot?.lastSeen == nil || (latestSnapshot?.lastSeen ?? .distantPast) < lastSeen {
+                    latestSnapshot = PresenceService.Snapshot(isOnline: false, lastSeen: lastSeen)
+                }
+            } else if latestSnapshot == nil {
+                latestSnapshot = snapshot
+            }
+        }
+
+        return latestSnapshot
+    }
+
+    private func removePresenceObservers() {
+        guard let conversation else { return }
+        conversation.participantIDs
+            .filter { $0 != currentUserID }
+            .forEach { presenceService.removeObserver(for: $0) }
     }
 }
 

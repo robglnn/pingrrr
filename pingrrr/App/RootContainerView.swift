@@ -22,11 +22,12 @@ struct RootContainerView: View {
             appServices.handleScenePhaseChange(newPhase)
         }
         .task {
-            await appServices.configure()
+            await appServices.configure(modelContext: modelContext)
         }
     }
 }
 
+@MainActor
 final class AppServices: ObservableObject {
     @Published private(set) var sessionState: SessionState = .loading
 
@@ -34,8 +35,20 @@ final class AppServices: ObservableObject {
     let presenceService = PresenceService()
     let notificationService = NotificationService()
     let networkMonitor = NetworkMonitor()
+    lazy var outgoingMessageQueue = OutgoingMessageQueue(networkMonitor: networkMonitor)
 
-    func configure() async {
+    private var modelContext: ModelContext?
+    private var hasConfigured = false
+
+    func configure(modelContext: ModelContext) async {
+        if modelContext !== self.modelContext {
+            self.modelContext = modelContext
+            outgoingMessageQueue.start(modelContext: modelContext)
+        }
+
+        guard !hasConfigured else { return }
+        hasConfigured = true
+
         networkMonitor.start()
         await notificationService.requestAuthorization()
         await notificationService.registerForRemoteNotifications()
@@ -48,10 +61,12 @@ final class AppServices: ObservableObject {
                     self.sessionState = .authenticated
                     await self.presenceService.updatePresence(isOnline: true)
                     await self.notificationService.refreshFCMToken()
+                    self.outgoingMessageQueue.triggerFlush()
                     await self.cacheAuthenticatedUser(user)
                 case .unauthenticated:
                     self.sessionState = .unauthenticated
                     await self.presenceService.updatePresence(isOnline: false)
+                    self.outgoingMessageQueue.reset()
                 case let .error(error):
                     self.sessionState = .error(error)
                 }
@@ -85,6 +100,7 @@ final class AppServices: ObservableObject {
     func signOut() throws {
         try authService.signOut()
         sessionState = .unauthenticated
+        outgoingMessageQueue.reset()
         networkMonitor.stop()
     }
 
