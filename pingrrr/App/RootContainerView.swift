@@ -28,15 +28,15 @@ struct RootContainerView: View {
 }
 
 final class AppServices: ObservableObject {
-    let objectWillChange = PassthroughSubject<Void, Never>()
-
     @Published private(set) var sessionState: SessionState = .loading
 
     let authService = AuthService()
     let presenceService = PresenceService()
     let notificationService = NotificationService()
+    let networkMonitor = NetworkMonitor()
 
     func configure() async {
+        networkMonitor.start()
         await notificationService.requestAuthorization()
         await notificationService.registerForRemoteNotifications()
 
@@ -85,6 +85,7 @@ final class AppServices: ObservableObject {
     func signOut() throws {
         try authService.signOut()
         sessionState = .unauthenticated
+        networkMonitor.stop()
     }
 
     private func cacheAuthenticatedUser(_ user: AuthenticatedUser) async {

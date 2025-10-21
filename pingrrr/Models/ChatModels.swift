@@ -146,6 +146,7 @@ final class MessageEntity {
     var statusRawValue: String
     var readByString: String // Store as JSON string for now
     var isLocalOnly: Bool
+    var retryCount: Int
 
     // Temporarily removing relationship for build compatibility
     // @Relationship(deleteRule: .nullify, inverse: \ConversationEntity.messages)
@@ -160,7 +161,8 @@ final class MessageEntity {
         timestamp: Date,
         status: MessageStatus,
         readBy: [String] = [],
-        isLocalOnly: Bool = false
+        isLocalOnly: Bool = false,
+        retryCount: Int = 0
     ) {
         self.id = id
         self.conversationID = conversationID
@@ -171,6 +173,7 @@ final class MessageEntity {
         self.statusRawValue = status.rawValue
         self.readByString = MessageEntity.encodeIDs(readBy)
         self.isLocalOnly = isLocalOnly
+        self.retryCount = retryCount
     }
 
     var status: MessageStatus {
