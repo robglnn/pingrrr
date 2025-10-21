@@ -1,0 +1,41 @@
+graph LR
+    subgraph "Pingrrr iOS App (Client)"
+        A[SwiftUI Views] -->|MVVM Binding| B[ViewModels]
+        B -->|Local Persistence & Offline Support| C[SwiftData]
+        B -->|Networking & Real-time Sync| D[Firebase SDK]
+        B -->|AI Contextual Features| E[Vercel AI SDK]
+    end
+
+    D -->|User Authentication| F[Firebase Auth]
+    D -->|Message Storage & Sync| G[Firestore Database]
+    D -->|Push Notifications| H[Firebase Cloud Messaging]
+    
+    subgraph "Firebase Backend"
+        F
+        G
+        H
+        I[Cloud Functions]
+    end
+
+    I -->|Secure AI Calls| J[OpenAI GPT-4 API]
+    I -->|RAG Pipeline| G
+    E -->|Function Calling/Tools| I
+
+    subgraph "Key Flows"
+        K[Real-time Message Delivery] -.->|Optimistic UI Updates| A
+        L[Offline Queuing & Persistence] -.->|Sync on Reconnect| C
+        M[Presence Detection] -.->|Online/Offline Indicators| G
+        N[AI Features: Translation, Detection, etc.] -.->|Contextual Menus/Long-press| A
+        O[Advanced: Smart Replies] -.->|Suggestions above Input| A
+    end
+
+    style A fill:#1f77b4,stroke:#000
+    style B fill:#ff7f0e,stroke:#000
+    style C fill:#2ca02c,stroke:#000
+    style D fill:#d62728,stroke:#000
+    style E fill:#9467bd,stroke:#000
+    style F fill:#8c564b,stroke:#000
+    style G fill:#e377c2,stroke:#000
+    style H fill:#7f7f7f,stroke:#000
+    style I fill:#bcbd22,stroke:#000
+    style J fill:#17becf,stroke:#000
