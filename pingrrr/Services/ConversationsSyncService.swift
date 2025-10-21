@@ -1,7 +1,6 @@
 import Foundation
 import SwiftData
 import FirebaseFirestore
-import FirebaseFirestoreSwift
 
 @MainActor
 final class ConversationsSyncService {
@@ -9,11 +8,13 @@ final class ConversationsSyncService {
     private var listener: ListenerRegistration?
     private var currentUserID: String?
     private weak var modelContext: ModelContext?
+    private var onChange: (() -> Void)?
 
-    func start(for userID: String, modelContext: ModelContext) {
+    func start(for userID: String, modelContext: ModelContext, onChange: @escaping () -> Void) {
         stop()
         currentUserID = userID
         self.modelContext = modelContext
+        self.onChange = onChange
 
         listener = db.collection("conversations")
             .whereField("participants", arrayContains: userID)
@@ -34,14 +35,13 @@ final class ConversationsSyncService {
     }
 
     func refresh() async {
-        guard let userID = currentUserID, let modelContext else { return }
+        guard let userID = currentUserID else { return }
 
         do {
             let snapshot = try await db.collection("conversations")
                 .whereField("participants", arrayContains: userID)
                 .getDocuments()
             try await processSnapshot(snapshot.documents)
-            try modelContext.save()
         } catch {
             print("[ConversationsSync] Refresh failed: \(error)")
         }
@@ -52,6 +52,7 @@ final class ConversationsSyncService {
         listener = nil
         currentUserID = nil
         modelContext = nil
+        onChange = nil
     }
 
     private func processChanges(_ changes: [DocumentChange]) async {
@@ -62,13 +63,14 @@ final class ConversationsSyncService {
                 switch change.type {
                 case .added, .modified:
                     let record = try change.document.data(as: ConversationRecord.self)
-                    try upsert(record, in: modelContext)
+                    upsert(record, in: modelContext)
                 case .removed:
                     let record = try change.document.data(as: ConversationRecord.self)
-                    try remove(recordID: record.id, in: modelContext)
+                    remove(recordID: record.id, in: modelContext)
                 }
             }
             try modelContext.save()
+            onChange?()
         } catch {
             print("[ConversationsSync] Change processing failed: \(error)")
         }
@@ -79,22 +81,28 @@ final class ConversationsSyncService {
 
         for document in documents {
             let record = try document.data(as: ConversationRecord.self)
-            try upsert(record, in: modelContext)
+            upsert(record, in: modelContext)
         }
+        try modelContext.save()
+        onChange?()
     }
 
-    private func upsert(_ record: ConversationRecord, in context: ModelContext) throws {
+    private func upsert(_ record: ConversationRecord, in context: ModelContext) {
         guard let identifier = record.id else { return }
 
         let descriptor = FetchDescriptor<ConversationEntity>(
-            predicate: #Predicate { $0.id == identifier },
-            fetchLimit: 1
+            predicate: #Predicate { $0.id == identifier }
         )
 
-        let entity = try context.fetch(descriptor).first ?? ConversationEntity(
+        let entity = (try? context.fetch(descriptor).first) ?? ConversationEntity(
             id: identifier,
+            title: record.title,
             participantIDs: record.participants,
-            type: record.type ?? .oneOnOne
+            type: record.type ?? .oneOnOne,
+            lastMessageID: record.lastMessageID,
+            lastMessagePreview: record.lastMessagePreview,
+            lastMessageTimestamp: record.lastMessageTimestamp,
+            unreadCount: 0
         )
 
         entity.title = record.title
@@ -116,28 +124,27 @@ final class ConversationsSyncService {
         }
     }
 
-    private func remove(recordID: String?, in context: ModelContext) throws {
+    private func remove(recordID: String?, in context: ModelContext) {
         guard let identifier = recordID else { return }
 
         let descriptor = FetchDescriptor<ConversationEntity>(
-            predicate: #Predicate { $0.id == identifier },
-            fetchLimit: 1
+            predicate: #Predicate { $0.id == identifier }
         )
 
-        if let entity = try context.fetch(descriptor).first {
+        if let entity = try? context.fetch(descriptor).first {
             context.delete(entity)
         }
     }
 }
 
 private struct ConversationRecord: Codable {
-    @DocumentID var id: String?
+    var id: String?
     var title: String?
     var participants: [String]
     var type: ConversationType?
     var lastMessageID: String?
     var lastMessagePreview: String?
-    @ServerTimestamp var lastMessageTimestamp: Date?
+    var lastMessageTimestamp: Date?
     var unreadCounts: [String: Int]?
 
     init(

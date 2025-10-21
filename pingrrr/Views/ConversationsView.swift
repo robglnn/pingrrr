@@ -7,12 +7,15 @@ struct ConversationsView: View {
 
     @State private var isPresentingSettings = false
 
+    private let appServices: AppServices
+
     init(appServices: AppServices, modelContext: ModelContext? = nil) {
+        self.appServices = appServices
         if let modelContext {
             _viewModel = ObservedObject(initialValue: ConversationsViewModel(modelContext: modelContext, appServices: appServices))
         } else {
-            let container = try? ModelContainer(for: UserEntity.self, ConversationEntity.self, MessageEntity.self)
-            let context = container?.mainContext ?? ModelContext(container!)
+            let container = try! ModelContainer(for: UserEntity.self, ConversationEntity.self, MessageEntity.self)
+            let context = container.mainContext
             _viewModel = ObservedObject(initialValue: ConversationsViewModel(modelContext: context, appServices: appServices))
         }
     }
@@ -28,11 +31,23 @@ struct ConversationsView: View {
                 } else {
                     List {
                         ForEach(viewModel.items) { conversation in
-                            ConversationRow(conversation: conversation)
-                                .listRowBackground(Color.clear)
-                                .onTapGesture {
-                                    // TODO: Navigate to chat view
+                            NavigationLink {
+                                if let modelContext = modelContext,
+                                   let userID = appServices.authService.currentUserID {
+                                    ChatView(
+                                        conversation: conversation,
+                                        currentUserID: userID,
+                                        modelContext: modelContext,
+                                        appServices: appServices
+                                    )
+                                } else {
+                                    Text("Unable to load conversation")
+                                        .foregroundStyle(.secondary)
                                 }
+                            } label: {
+                                ConversationRow(conversation: conversation)
+                            }
+                            .listRowBackground(Color.clear)
                         }
                     }
                     .listStyle(.plain)

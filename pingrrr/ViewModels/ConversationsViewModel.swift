@@ -1,44 +1,36 @@
 import Foundation
 import SwiftData
+import Combine
 import FirebaseFirestore
 
 @MainActor
 final class ConversationsViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var items: [ConversationEntity] = []
 
     private let modelContext: ModelContext
     private let appServices: AppServices
     private let syncService = ConversationsSyncService()
 
-    @Query private var conversations: [ConversationEntity]
-
-    var items: [ConversationEntity] {
-        conversations.sorted { lhs, rhs in
-            (lhs.lastMessageTimestamp ?? .distantPast) > (rhs.lastMessageTimestamp ?? .distantPast)
-        }
-    }
-
     init(modelContext: ModelContext, appServices: AppServices) {
         self.modelContext = modelContext
         self.appServices = appServices
-
-        let descriptor = FetchDescriptor<ConversationEntity>(
-            sortBy: [SortDescriptor(\.lastMessageTimestamp, order: .reverse)]
-        )
-        _conversations = Query(descriptor)
+        refreshLocalItems()
     }
 
     func start() {
         guard let userID = appServices.authService.currentUserID else { return }
-        syncService.start(for: userID, modelContext: modelContext)
+        syncService.start(for: userID, modelContext: modelContext) { [weak self] in
+            self?.refreshLocalItems()
+        }
     }
 
     func refresh() async {
         isLoading = true
         defer { isLoading = false }
-
         await syncService.refresh()
+        refreshLocalItems()
     }
 
     func stop() {
@@ -55,8 +47,18 @@ final class ConversationsViewModel: ObservableObject {
 
             conversation.unreadCount = 0
             try modelContext.save()
+            refreshLocalItems()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshLocalItems() {
+        let descriptor = FetchDescriptor<ConversationEntity>(
+            sortBy: [SortDescriptor(\.lastMessageTimestamp, order: .reverse)]
+        )
+        if let fetched = try? modelContext.fetch(descriptor) {
+            items = fetched
         }
     }
 }

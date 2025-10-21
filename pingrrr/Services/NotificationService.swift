@@ -1,5 +1,7 @@
 import Foundation
 import UserNotifications
+import Combine
+import UIKit
 import FirebaseMessaging
 import FirebaseAuth
 import FirebaseFirestore
@@ -7,6 +9,8 @@ import FirebaseFirestore
 @MainActor
 final class NotificationService: NSObject, ObservableObject {
     private var authorizationStatus: UNAuthorizationStatus = .notDetermined
+
+    let objectWillChange = PassthroughSubject<Void, Never>()
 
     override init() {
         super.init()

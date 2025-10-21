@@ -63,19 +63,21 @@ enum ConversationType: String, Codable, CaseIterable, Sendable {
     case group
 }
 
+// Temporarily simplifying ConversationEntity for build compatibility
 @Model
 final class ConversationEntity {
     @Attribute(.unique) var id: String
     var title: String?
-    @Attribute(.transformable) var participantIDs: [String]
+    var participantIDsString: String // Store as JSON string for now
     var typeRawValue: String
     var lastMessageID: String?
     var lastMessagePreview: String?
     var lastMessageTimestamp: Date?
     var unreadCount: Int
 
-    @Relationship(deleteRule: .cascade, inverse: \MessageEntity.conversation)
-    var messages: [MessageEntity]
+    // Temporarily removing relationship for build compatibility
+    // @Relationship(deleteRule: .cascade, inverse: \MessageEntity.conversation)
+    // var messages: [MessageEntity]
 
     init(
         id: String,
@@ -85,23 +87,42 @@ final class ConversationEntity {
         lastMessageID: String? = nil,
         lastMessagePreview: String? = nil,
         lastMessageTimestamp: Date? = nil,
-        unreadCount: Int = 0,
-        messages: [MessageEntity] = []
+        unreadCount: Int = 0
     ) {
         self.id = id
         self.title = title
-        self.participantIDs = participantIDs
+        self.participantIDsString = ConversationEntity.encodeIDs(participantIDs)
         self.typeRawValue = type.rawValue
         self.lastMessageID = lastMessageID
         self.lastMessagePreview = lastMessagePreview
         self.lastMessageTimestamp = lastMessageTimestamp
         self.unreadCount = unreadCount
-        self.messages = messages
     }
 
     var type: ConversationType {
         get { ConversationType(rawValue: typeRawValue) ?? .oneOnOne }
         set { typeRawValue = newValue.rawValue }
+    }
+
+    var participantIDs: [String] {
+        get { ConversationEntity.decodeIDs(participantIDsString) }
+        set { participantIDsString = ConversationEntity.encodeIDs(newValue) }
+    }
+
+    private static func encodeIDs(_ ids: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(ids),
+              let string = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return string
+    }
+
+    private static func decodeIDs(_ string: String) -> [String] {
+        guard let data = string.data(using: .utf8),
+              let ids = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return ids
     }
 }
 
@@ -113,6 +134,7 @@ enum MessageStatus: String, Codable, CaseIterable, Sendable {
     case failed
 }
 
+// Temporarily simplifying MessageEntity for build compatibility
 @Model
 final class MessageEntity {
     @Attribute(.unique) var id: String
@@ -122,11 +144,12 @@ final class MessageEntity {
     var translatedContent: String?
     var timestamp: Date
     var statusRawValue: String
-    @Attribute(.transformable) var readBy: [String]
+    var readByString: String // Store as JSON string for now
     var isLocalOnly: Bool
 
-    @Relationship(deleteRule: .nullify, inverse: \ConversationEntity.messages)
-    var conversation: ConversationEntity?
+    // Temporarily removing relationship for build compatibility
+    // @Relationship(deleteRule: .nullify, inverse: \ConversationEntity.messages)
+    // var conversation: ConversationEntity?
 
     init(
         id: String,
@@ -146,13 +169,34 @@ final class MessageEntity {
         self.translatedContent = translatedContent
         self.timestamp = timestamp
         self.statusRawValue = status.rawValue
-        self.readBy = readBy
+        self.readByString = MessageEntity.encodeIDs(readBy)
         self.isLocalOnly = isLocalOnly
     }
 
     var status: MessageStatus {
         get { MessageStatus(rawValue: statusRawValue) ?? .sending }
         set { statusRawValue = newValue.rawValue }
+    }
+
+    var readBy: [String] {
+        get { MessageEntity.decodeIDs(readByString) }
+        set { readByString = MessageEntity.encodeIDs(newValue) }
+    }
+
+    private static func encodeIDs(_ ids: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(ids),
+              let string = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return string
+    }
+
+    private static func decodeIDs(_ string: String) -> [String] {
+        guard let data = string.data(using: .utf8),
+              let ids = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return ids
     }
 }
 

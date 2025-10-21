@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Combine
 import FirebaseAuth
 
 struct RootContainerView: View {
@@ -12,6 +13,7 @@ struct RootContainerView: View {
         Group {
             if appServices.sessionState == .authenticated {
                 ConversationsView(appServices: appServices)
+                    .environment(\.modelContext, modelContext)
             } else {
                 AuthenticationFlowView(appServices: appServices)
             }
@@ -26,6 +28,8 @@ struct RootContainerView: View {
 }
 
 final class AppServices: ObservableObject {
+    let objectWillChange = PassthroughSubject<Void, Never>()
+
     @Published private(set) var sessionState: SessionState = .loading
 
     let authService = AuthService()
@@ -41,15 +45,15 @@ final class AppServices: ObservableObject {
                 guard let self else { return }
                 switch result {
                 case let .authenticated(user):
-                    sessionState = .authenticated
-                    await presenceService.updatePresence(isOnline: true)
-                    await notificationService.refreshFCMToken()
-                    await cacheAuthenticatedUser(user)
+                    self.sessionState = .authenticated
+                    await self.presenceService.updatePresence(isOnline: true)
+                    await self.notificationService.refreshFCMToken()
+                    await self.cacheAuthenticatedUser(user)
                 case .unauthenticated:
-                    sessionState = .unauthenticated
-                    await presenceService.updatePresence(isOnline: false)
+                    self.sessionState = .unauthenticated
+                    await self.presenceService.updatePresence(isOnline: false)
                 case let .error(error):
-                    sessionState = .error(error)
+                    self.sessionState = .error(error)
                 }
             }
         }
