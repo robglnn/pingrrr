@@ -9,15 +9,23 @@ import SwiftUI
 import SwiftData
 
 @main
-struct pingrrrApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+struct PingrrrApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    var sharedModelContainer: ModelContainer = {
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let schema = Schema([
+                UserEntity.self,
+                ConversationEntity.self,
+                MessageEntity.self
+            ])
+
+            let configuration = ModelConfiguration(
+                schema: schema,
+                isStoredInMemoryOnly: false
+            )
+
+            return try ModelContainer(for: schema, configurations: [configuration])
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
@@ -25,7 +33,8 @@ struct pingrrrApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootContainerView()
+                .preferredColorScheme(.dark)
         }
         .modelContainer(sharedModelContainer)
     }
