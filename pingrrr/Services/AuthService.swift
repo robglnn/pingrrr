@@ -1,5 +1,7 @@
 import Foundation
 import FirebaseAuth
+import GoogleSignIn
+import UIKit
 
 struct AuthenticatedUser {
     let id: String
@@ -64,6 +66,51 @@ final class AuthService {
 
     func reloadCurrentUser() async throws {
         try await Auth.auth().currentUser?.reload()
+    }
+
+    func signInWithGoogle(presenting viewController: UIViewController?) async throws {
+        let presentingController: UIViewController
+
+        if let viewController {
+            presentingController = viewController
+        } else if let controller = UIApplication.shared.connectedScenes
+            .compactMap({ ($0 as? UIWindowScene)?.keyWindow?.rootViewController })
+            .first {
+            presentingController = controller
+        } else {
+            throw AuthError.missingPresentingController
+        }
+
+        let signInResult = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingController)
+
+        guard let idToken = signInResult.user.idToken?.tokenString else {
+            throw AuthError.missingGoogleIDToken
+        }
+
+        let accessToken = signInResult.user.accessToken.tokenString
+        let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
+
+        do {
+            try await Auth.auth().signIn(with: credential)
+        } catch {
+            throw error
+        }
+    }
+}
+
+extension AuthService {
+    enum AuthError: LocalizedError {
+        case missingPresentingController
+        case missingGoogleIDToken
+
+        var errorDescription: String? {
+            switch self {
+            case .missingPresentingController:
+                return "Unable to find a view controller to present the Google Sign-In flow."
+            case .missingGoogleIDToken:
+                return "Google Sign-In did not return an ID token."
+            }
+        }
     }
 }
 

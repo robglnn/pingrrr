@@ -259,3 +259,11 @@ private struct MessageBubbleView: View {
         }
     }
 }
+
+private enum Formatter {
+    static let relativeDateFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
+}

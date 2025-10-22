@@ -93,6 +93,10 @@ final class AppServices: ObservableObject {
         try await authService.signIn(email: email, password: password)
     }
 
+    func signInWithGoogle(presenting viewController: UIViewController? = nil) async throws {
+        try await authService.signInWithGoogle(presenting: viewController)
+    }
+
     func signUp(email: String, password: String, displayName: String) async throws {
         try await authService.signUp(email: email, password: password, displayName: displayName)
     }

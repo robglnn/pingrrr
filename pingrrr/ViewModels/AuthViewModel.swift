@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import UIKit
 
 @MainActor
 final class AuthViewModel: ObservableObject {
@@ -32,6 +33,8 @@ final class AuthViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
 
+    @Published var googleErrorMessage: String?
+
     private let appServices: AppServices
 
     init(appServices: AppServices) {
@@ -62,6 +65,7 @@ final class AuthViewModel: ObservableObject {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             mode = mode == .signIn ? .signUp : .signIn
             errorMessage = nil
+            googleErrorMessage = nil
         }
     }
 
@@ -87,6 +91,20 @@ final class AuthViewModel: ObservableObject {
         }
 
         return true
+    }
+
+    func signInWithGoogle(presenting viewController: UIViewController?) async {
+        guard !isLoading else { return }
+        errorMessage = nil
+        googleErrorMessage = nil
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            try await appServices.signInWithGoogle(presenting: viewController)
+        } catch {
+            googleErrorMessage = error.localizedDescription
+        }
     }
 }
 

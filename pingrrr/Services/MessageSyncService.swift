@@ -1,7 +1,6 @@
 import Foundation
 import SwiftData
 import FirebaseFirestore
-import FirebaseFirestoreSwift
 
 @MainActor
 final class MessageSyncService {
@@ -46,16 +45,13 @@ final class MessageSyncService {
 
     func refresh() async {
         guard let conversationID, let _ = currentUserID else { return }
-        do {
-            let snapshot = try await db.collection("conversations")
-                .document(conversationID)
-                .collection("messages")
-                .order(by: "timestamp", descending: false)
-                .getDocuments()
-            try await processSnapshot(snapshot.documents)
-        } catch {
-            print("[MessageSync] Refresh failed: \(error)")
-        }
+        let snapshot = try? await db.collection("conversations")
+            .document(conversationID)
+            .collection("messages")
+            .order(by: "timestamp", descending: false)
+            .getDocuments()
+        guard let documents = snapshot?.documents else { return }
+        await processSnapshot(documents)
     }
 
     func stop() {
@@ -70,32 +66,28 @@ final class MessageSyncService {
     private func processChanges(_ changes: [DocumentChange]) async {
         guard let modelContext else { return }
 
-        do {
-            for change in changes {
-                let record = try change.document.data(as: MessageRecord.self)
-                switch change.type {
-                case .added, .modified:
-                    upsert(record, changeType: change.type, isInitialLoad: false, in: modelContext)
-                case .removed:
-                    remove(recordID: record.id, in: modelContext)
-                }
+        for change in changes {
+            guard let record = try? change.document.data(as: MessageRecord.self) else { continue }
+            switch change.type {
+            case .added, .modified:
+                upsert(record, changeType: change.type, isInitialLoad: false, in: modelContext)
+            case .removed:
+                remove(recordID: record.id, in: modelContext)
             }
-            try modelContext.save()
-            onChange?()
-        } catch {
-            print("[MessageSync] Change processing failed: \(error)")
         }
+        try? modelContext.save()
+        onChange?()
     }
 
-    private func processSnapshot(_ documents: [QueryDocumentSnapshot]) async throws {
+    private func processSnapshot(_ documents: [QueryDocumentSnapshot]) async {
         guard let modelContext else { return }
 
         for document in documents {
-            let record = try document.data(as: MessageRecord.self)
+            guard let record = try? document.data(as: MessageRecord.self) else { continue }
             upsert(record, changeType: nil, isInitialLoad: true, in: modelContext)
         }
 
-        try modelContext.save()
+        try? modelContext.save()
         onChange?()
     }
 
@@ -207,7 +199,7 @@ final class MessageSyncService {
 }
 
 private struct MessageRecord: Codable {
-    @DocumentID var id: String?
+    var id: String?
     var conversationID: String?
     var senderID: String?
     var content: String?
@@ -251,6 +243,3 @@ private struct MessageRecord: Codable {
         self.unreadCounts = unreadCounts
     }
 }
-
-        }
-    }

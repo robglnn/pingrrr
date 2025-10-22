@@ -6,8 +6,8 @@
 - Ensure work stays aligned with `MVPtasks.md`, `MVPcriticalrequirements.md`, and rubric KPIs (sub-200 ms delivery, 60 FPS, <2 s launch).
 
 ## Recent Actions
-- Created Memory Bank to track project brief, product context, system patterns, and technical setup.
-- Confirmed Firebase initialization snippet (`firebaseinit-code.md`) provided for AppDelegate configuration.
+- Implemented SwiftData-backed outgoing message queue with retry backoff and presence indicators across the app.
+- Added Google Sign-In support alongside email/password using Firebase Auth, including UI button and credential handling.
 
 ## Immediate Next Steps
 - Finish offline resilience: persist outgoing messages in SwiftData, retry with exponential backoff, and reconcile local/remote state on reconnect.

@@ -32,14 +32,14 @@ struct ConversationsView: View {
                     List {
                         ForEach(viewModel.items) { conversation in
                             NavigationLink {
-                                if let modelContext = modelContext,
-                                   let userID = appServices.authService.currentUserID {
+                                if let userID = appServices.authService.currentUserID {
                                     ChatView(
                                         conversation: conversation,
                                         currentUserID: userID,
                                         modelContext: modelContext,
                                         appServices: appServices
                                     )
+                                    .environment(\.modelContext, modelContext)
                                 } else {
                                     Text("Unable to load conversation")
                                         .foregroundStyle(.secondary)

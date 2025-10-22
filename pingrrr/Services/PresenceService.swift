@@ -1,6 +1,7 @@
 import Foundation
 import FirebaseFirestore
 import FirebaseAuth
+import Combine
 
 @MainActor
 final class PresenceService: ObservableObject {
