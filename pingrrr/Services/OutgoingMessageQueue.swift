@@ -2,6 +2,9 @@ import Foundation
 import SwiftData
 import FirebaseFirestore
 
+private let failedStatusRawValue = MessageStatus.failed.rawValue
+private let sendingStatusRawValue = MessageStatus.sending.rawValue
+
 @MainActor
 final class OutgoingMessageQueue {
     private let db = Firestore.firestore()
@@ -100,8 +103,8 @@ final class OutgoingMessageQueue {
         let descriptor = FetchDescriptor<MessageEntity>(
             predicate: #Predicate<MessageEntity> { entity in
                 entity.isLocalOnly &&
-                    (entity.statusRawValue == MessageStatus.failed.rawValue ||
-                     entity.statusRawValue == MessageStatus.sending.rawValue)
+                    (entity.statusRawValue == failedStatusRawValue ||
+                     entity.statusRawValue == sendingStatusRawValue)
             },
             sortBy: [SortDescriptor(\.nextRetryTimestamp, order: .forward)]
         )
@@ -153,8 +156,8 @@ final class OutgoingMessageQueue {
         let descriptor = FetchDescriptor<MessageEntity>(
             predicate: #Predicate<MessageEntity> { entity in
                 entity.isLocalOnly &&
-                    (entity.statusRawValue == MessageStatus.sending.rawValue ||
-                     entity.statusRawValue == MessageStatus.failed.rawValue)
+                    (entity.statusRawValue == sendingStatusRawValue ||
+                     entity.statusRawValue == failedStatusRawValue)
             },
             sortBy: [SortDescriptor(\.timestamp, order: .forward)]
         )

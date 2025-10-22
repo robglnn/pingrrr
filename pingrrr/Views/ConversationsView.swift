@@ -7,7 +7,7 @@ struct ConversationsView: View {
     @ObservedObject private var viewModel: ConversationsViewModel
 
     @State private var isPresentingSettings = false
-    @State private var navigationPath = NavigationPath()
+    @State private var navigationPath: [String] = []
     @State private var activeNotification: NotificationService.ChatNotification?
     @State private var notificationDismissTask: Task<Void, Never>?
 
@@ -239,7 +239,7 @@ private extension ConversationsView {
 
     private func openConversation(withID id: String) {
         activeNotification = nil
-        if !navigationPath.contains(where: { ($0 as? String) == id }) {
+        if !navigationPath.contains(id) {
             navigationPath.append(id)
         }
     }
