@@ -37,7 +37,6 @@ final class ConversationsViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
                 guard let self else { return }
-                NotificationCenter.default.post(name: .didReceiveForegroundChatNotification, object: notification)
                 self.handleForegroundNotification(notification)
             }
     }

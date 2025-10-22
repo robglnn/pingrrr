@@ -175,8 +175,7 @@ final class MessageSyncService {
         guard let conversationID = record.conversationID ?? conversationID else { return }
 
         let descriptor = FetchDescriptor<ConversationEntity>(
-            predicate: #Predicate { $0.id == conversationID },
-            fetchLimit: 1
+            predicate: #Predicate { $0.id == conversationID }
         )
 
         guard let conversation = try? context.fetch(descriptor).first else { return }

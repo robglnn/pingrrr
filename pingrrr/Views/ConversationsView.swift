@@ -1,11 +1,15 @@
 import SwiftUI
 import SwiftData
+import Combine
 
 struct ConversationsView: View {
     @Environment(\.modelContext) private var modelContext
     @ObservedObject private var viewModel: ConversationsViewModel
 
     @State private var isPresentingSettings = false
+    @State private var navigationPath = NavigationPath()
+    @State private var activeNotification: NotificationService.ChatNotification?
+    @State private var notificationDismissTask: Task<Void, Never>?
 
     private let appServices: AppServices
 
@@ -21,7 +25,7 @@ struct ConversationsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             ZStack {
                 backgroundGradient
                     .ignoresSafeArea()
@@ -31,20 +35,7 @@ struct ConversationsView: View {
                 } else {
                     List {
                         ForEach(viewModel.items) { conversation in
-                            NavigationLink {
-                                if let userID = appServices.authService.currentUserID {
-                                    ChatView(
-                                        conversation: conversation,
-                                        currentUserID: userID,
-                                        modelContext: modelContext,
-                                        appServices: appServices
-                                    )
-                                    .environment(\.modelContext, modelContext)
-                                } else {
-                                    Text("Unable to load conversation")
-                                        .foregroundStyle(.secondary)
-                                }
-                            } label: {
+                            NavigationLink(value: conversation.id) {
                                 ConversationRow(
                                     conversation: conversation,
                                     presence: presenceData(for: conversation)
@@ -62,6 +53,34 @@ struct ConversationsView: View {
             .refreshable { await viewModel.refresh() }
             .task { viewModel.start() }
             .onDisappear { viewModel.stop() }
+            .navigationDestination(for: String.self) { conversationID in
+                if let conversation = viewModel.items.first(where: { $0.id == conversationID }),
+                   let userID = appServices.authService.currentUserID {
+                    ChatView(
+                        conversation: conversation,
+                        currentUserID: userID,
+                        modelContext: modelContext,
+                        appServices: appServices
+                    )
+                    .environment(\.modelContext, modelContext)
+                } else {
+                    Text("Unable to load conversation")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            if let notification = activeNotification {
+                NotificationBannerView(notification: notification) {
+                    openConversation(withID: notification.conversationID)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .onReceive(appServices.notificationService.$lastNotification.compactMap { $0 }) { notification in
+            presentNotification(notification)
         }
     }
 
@@ -200,6 +219,60 @@ private extension ConversationsView {
             return ConversationsViewModel.PresenceViewData(isOnline: false, lastSeen: nil)
         }
         return viewModel.presenceState(for: conversation, currentUserID: currentUserID)
+    }
+
+    private func presentNotification(_ notification: NotificationService.ChatNotification) {
+        notificationDismissTask?.cancel()
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            activeNotification = notification
+        }
+
+        notificationDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                if activeNotification?.id == notification.id {
+                    activeNotification = nil
+                }
+            }
+        }
+    }
+
+    private func openConversation(withID id: String) {
+        activeNotification = nil
+        if !navigationPath.contains(where: { ($0 as? String) == id }) {
+            navigationPath.append(id)
+        }
+    }
+}
+
+private struct NotificationBannerView: View {
+    let notification: NotificationService.ChatNotification
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(notification.senderName)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(notification.body.isEmpty ? "New message" : notification.body)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                Text(notification.timestamp, style: .time)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .shadow(color: Color.black.opacity(0.3), radius: 12, x: 0, y: 8)
     }
 }
 

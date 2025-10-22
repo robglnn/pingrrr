@@ -23,8 +23,6 @@ final class NotificationService: NSObject, ObservableObject {
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var lastNotification: ChatNotification?
 
-    private var authorizationTask: Task<Void, Never>?
-
     private override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
@@ -87,12 +85,22 @@ final class NotificationService: NSObject, ObservableObject {
 
         let senderName = (userInfo["senderName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? "New message"
-        let body = (userInfo["body"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? (userInfo["aps"] as? [String: Any])?
-            .flatMap { $0["alert"] as? [String: Any] }?
-            .compactMap { $0.value as? String }
-            .joined(separator: " ")
-            ?? ""
+        let body: String
+        if let explicitBody = (userInfo["body"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            body = explicitBody
+        } else if
+            let apsAny = userInfo["aps"],
+            let aps = apsAny as? [String: Any],
+            let alertAny = aps["alert"],
+            let alert = alertAny as? [String: Any]
+        {
+            let components: [String] = alert.compactMap { _, value in
+                value as? String
+            }
+            body = components.joined(separator: " ")
+        } else {
+            body = ""
+        }
 
         let timestamp: Date
         if let seconds = userInfo["timestamp"] as? TimeInterval {
@@ -121,10 +129,6 @@ extension NotificationService: MessagingDelegate {
         Task {
             await refreshFCMToken()
         }
-    }
-
-    func messaging(_ messaging: Messaging, didReceive remoteMessage: MessagingRemoteMessage) {
-        handleIncomingNotification(userInfo: remoteMessage.appData)
     }
 }
 

@@ -98,8 +98,10 @@ final class OutgoingMessageQueue {
         guard let modelContext else { return nil }
 
         let descriptor = FetchDescriptor<MessageEntity>(
-            predicate: #Predicate { message in
-                message.isLocalOnly && (message.status == .failed || message.status == .sending)
+            predicate: #Predicate<MessageEntity> { entity in
+                entity.isLocalOnly &&
+                    (entity.statusRawValue == MessageStatus.failed.rawValue ||
+                     entity.statusRawValue == MessageStatus.sending.rawValue)
             },
             sortBy: [SortDescriptor(\.nextRetryTimestamp, order: .forward)]
         )
@@ -149,8 +151,10 @@ final class OutgoingMessageQueue {
         guard let modelContext else { return [] }
 
         let descriptor = FetchDescriptor<MessageEntity>(
-            predicate: #Predicate { message in
-                message.isLocalOnly && (message.status == .sending || message.status == .failed)
+            predicate: #Predicate<MessageEntity> { entity in
+                entity.isLocalOnly &&
+                    (entity.statusRawValue == MessageStatus.sending.rawValue ||
+                     entity.statusRawValue == MessageStatus.failed.rawValue)
             },
             sortBy: [SortDescriptor(\.timestamp, order: .forward)]
         )
@@ -216,5 +220,6 @@ final class OutgoingMessageQueue {
         }
     }
 }
+
 
 

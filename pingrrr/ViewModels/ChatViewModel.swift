@@ -212,7 +212,7 @@ final class ChatViewModel: ObservableObject {
     private func refreshConversationReference() {
         let descriptor = FetchDescriptor<ConversationEntity>(
             predicate: #Predicate { $0.id == conversationID },
-            fetchLimit: 1
+            sortBy: []
         )
         if let fetched = try? modelContext.fetch(descriptor).first {
             conversation = fetched
