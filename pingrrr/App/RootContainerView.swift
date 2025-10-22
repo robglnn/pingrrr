@@ -33,7 +33,7 @@ final class AppServices: ObservableObject {
 
     let authService = AuthService()
     let presenceService = PresenceService()
-    let notificationService = NotificationService()
+    let notificationService = NotificationService.shared
     let networkMonitor = NetworkMonitor()
     lazy var outgoingMessageQueue = OutgoingMessageQueue(networkMonitor: networkMonitor)
 

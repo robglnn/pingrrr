@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseCore
+import FirebaseMessaging
 import GoogleSignIn
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
@@ -7,9 +8,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        // Configure Firebase
         FirebaseApp.configure()
-
         return true
     }
 

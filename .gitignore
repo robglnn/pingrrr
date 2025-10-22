@@ -70,3 +70,6 @@ fastlane/README.md
 xcuserdata/
 *.moved-aside
 *.perspectivev3
+*.plist
+**Info.plist
+**GoogleService-Info.plist

@@ -13,13 +13,16 @@ final class ConversationsViewModel: ObservableObject {
     private let appServices: AppServices
     private let syncService = ConversationsSyncService()
     private let presenceService: PresenceService
+    private let notificationService: NotificationService
 
     private var observedPresenceIDs: Set<String> = []
+    private var notificationObserver: AnyCancellable?
 
     init(modelContext: ModelContext, appServices: AppServices) {
         self.modelContext = modelContext
         self.appServices = appServices
         self.presenceService = appServices.presenceService
+        self.notificationService = appServices.notificationService
         refreshLocalItems()
     }
 
@@ -28,6 +31,15 @@ final class ConversationsViewModel: ObservableObject {
         syncService.start(for: userID, modelContext: modelContext) { [weak self] in
             self?.refreshLocalItems()
         }
+
+        notificationObserver = notificationService.$lastNotification
+            .compactMap { $0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self else { return }
+                NotificationCenter.default.post(name: .didReceiveForegroundChatNotification, object: notification)
+                self.handleForegroundNotification(notification)
+            }
     }
 
     func refresh() async {
@@ -41,6 +53,8 @@ final class ConversationsViewModel: ObservableObject {
         syncService.stop()
         presenceService.removeAllObservers()
         observedPresenceIDs.removeAll()
+        notificationObserver?.cancel()
+        notificationObserver = nil
     }
 
     func markConversationAsRead(_ conversation: ConversationEntity) async {
@@ -108,6 +122,22 @@ final class ConversationsViewModel: ObservableObject {
         }
 
         return PresenceViewData(isOnline: isOnline, lastSeen: latestSeen)
+    }
+
+    private func handleForegroundNotification(_ notification: NotificationService.ChatNotification) {
+        guard let conversation = items.first(where: { $0.id == notification.conversationID }) else {
+            Task { await refresh() }
+            return
+        }
+
+        if let userID = appServices.authService.currentUserID,
+           conversation.unreadCount == 0 {
+            Task {
+                await markConversationAsRead(conversation)
+            }
+        }
+
+        refreshLocalItems()
     }
 }
 
