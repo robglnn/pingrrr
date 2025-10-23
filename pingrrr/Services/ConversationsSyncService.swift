@@ -125,7 +125,7 @@ final class ConversationsSyncService {
             type: record.type ?? .oneOnOne,
             lastMessageID: record.lastMessageID,
             lastMessagePreview: record.lastMessagePreview,
-            lastMessageTimestamp: record.lastMessageTimestamp,
+            lastMessageTimestamp: record.lastMessageTimestamp ?? Date(),
             unreadCount: 0
         )
 
@@ -134,7 +134,7 @@ final class ConversationsSyncService {
         entity.type = record.type ?? .oneOnOne
         entity.lastMessageID = record.lastMessageID
         entity.lastMessagePreview = record.lastMessagePreview
-        entity.lastMessageTimestamp = record.lastMessageTimestamp
+        entity.lastMessageTimestamp = record.lastMessageTimestamp ?? entity.lastMessageTimestamp ?? Date()
 
         if let userID = currentUserID,
            let unread = record.unreadCounts?[userID] {

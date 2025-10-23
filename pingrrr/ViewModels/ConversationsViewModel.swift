@@ -23,6 +23,7 @@ final class ConversationsViewModel: ObservableObject {
         self.appServices = appServices
         self.presenceService = appServices.presenceService
         self.notificationService = appServices.notificationService
+        performInitialCleanup()
         refreshLocalItems()
     }
 
@@ -70,6 +71,8 @@ final class ConversationsViewModel: ObservableObject {
         print("[ConversationsViewModel] Refreshing conversations...")
         await refresh()
 
+        cleanupStaleConversations()
+
         if items.contains(where: { $0.id == conversationID }) {
             print("[ConversationsViewModel] Conversation now available after refresh")
             return
@@ -80,6 +83,7 @@ final class ConversationsViewModel: ObservableObject {
         while Date() < deadline {
             try? await Task.sleep(nanoseconds: 200_000_000)
             refreshLocalItems()
+            cleanupStaleConversations()
             if items.contains(where: { $0.id == conversationID }) {
                 print("[ConversationsViewModel] Conversation found after waiting")
                 return
@@ -203,6 +207,60 @@ final class ConversationsViewModel: ObservableObject {
         }
 
         refreshLocalItems()
+    }
+
+    private func cleanupStaleConversations() {
+        guard let currentUserID = appServices.authService.currentUserID else { return }
+
+        let descriptor = FetchDescriptor<ConversationEntity>(
+            sortBy: [SortDescriptor(\.lastMessageTimestamp, order: .reverse)]
+        )
+
+        guard let allConversations = try? modelContext.fetch(descriptor) else { return }
+
+        let filtered = allConversations.filter { $0.participantIDs.contains(currentUserID) }
+
+        if filtered.count != allConversations.count {
+            let stale = Set(allConversations.map { $0.id }).subtracting(filtered.map { $0.id })
+            print("[ConversationsViewModel] Removing stale conversations: \(Array(stale))")
+            for conversation in allConversations where stale.contains(conversation.id) {
+                modelContext.delete(conversation)
+            }
+            try? modelContext.save()
+        }
+
+        items = filtered.sorted(by: conversationSort)
+    }
+
+    private func performInitialCleanup() {
+        guard let currentUserID = appServices.authService.currentUserID else { return }
+
+        let descriptor = FetchDescriptor<ConversationEntity>()
+        guard let allConversations = try? modelContext.fetch(descriptor) else { return }
+
+        let staleConversations = allConversations.filter { !$0.participantIDs.contains(currentUserID) }
+
+        if !staleConversations.isEmpty {
+            print("[ConversationsViewModel] Initial cleanup removing conversations: \(staleConversations.map { $0.id })")
+            for conversation in staleConversations {
+                modelContext.delete(conversation)
+            }
+            try? modelContext.save()
+        }
+
+        items = allConversations.filter { $0.participantIDs.contains(currentUserID) }
+            .sorted(by: conversationSort)
+    }
+
+    private func conversationSort(_ lhs: ConversationEntity, _ rhs: ConversationEntity) -> Bool {
+        let lhsTimestamp = lhs.lastMessageTimestamp ?? .distantPast
+        let rhsTimestamp = rhs.lastMessageTimestamp ?? .distantPast
+
+        if lhsTimestamp == rhsTimestamp {
+            return lhs.id > rhs.id
+        }
+
+        return lhsTimestamp > rhsTimestamp
     }
 }
 
