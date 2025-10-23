@@ -17,6 +17,7 @@ final class MessageSyncService {
         modelContext: ModelContext,
         onChange: @escaping () -> Void
     ) {
+        print("[MessageSyncService] Starting for conversationID=\(conversationID), userID=\(userID)")
         stop()
         self.conversationID = conversationID
         self.currentUserID = userID
@@ -44,6 +45,7 @@ final class MessageSyncService {
     }
 
     func refresh() async {
+        print("[MessageSyncService] Refresh requested for conversationID=\(conversationID ?? "nil")")
         guard let conversationID, let _ = currentUserID else { return }
         let snapshot = try? await db.collection("conversations")
             .document(conversationID)

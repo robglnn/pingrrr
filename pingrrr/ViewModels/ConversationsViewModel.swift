@@ -88,6 +88,37 @@ final class ConversationsViewModel: ObservableObject {
         print("[ConversationsViewModel] Conversation not found after waiting: \(conversationID)")
     }
 
+    func appendPlaceholderConversation(
+        id: String,
+        title: String?,
+        participantIDs: [String],
+        currentUserID: String
+    ) {
+        print("[ConversationsViewModel] appendPlaceholderConversation id=\(id)")
+        guard !items.contains(where: { $0.id == id }) else { return }
+
+        let placeholder = ConversationEntity(
+            id: id,
+            title: title,
+            participantIDs: participantIDs,
+            type: .oneOnOne,
+            lastMessageID: nil,
+            lastMessagePreview: "",
+            lastMessageTimestamp: Date(),
+            unreadCount: 0
+        )
+
+        if placeholder.persistentModelID == nil {
+            modelContext.insert(placeholder)
+            try? modelContext.save()
+        }
+
+        items.insert(placeholder, at: 0)
+        let otherParticipants = participantIDs.filter { $0 != currentUserID }
+        presenceService.observe(userIDs: otherParticipants)
+        print("[ConversationsViewModel] items now: \(items.map { $0.id })")
+    }
+
     func markConversationAsRead(_ conversation: ConversationEntity) async {
         guard let userID = appServices.authService.currentUserID else { return }
         let docRef = Firestore.firestore().collection("conversations").document(conversation.id)
@@ -110,10 +141,7 @@ final class ConversationsViewModel: ObservableObject {
         )
         do {
             let fetched = try modelContext.fetch(descriptor)
-            print("[ConversationsViewModel] refreshLocalItems fetched \(fetched.count) conversations")
-            fetched.forEach { conversation in
-                print("[ConversationsViewModel] Conversation: id=\(conversation.id), title=\(conversation.title ?? "nil"), lastMessageTimestamp=\(String(describing: conversation.lastMessageTimestamp)), unread=\(conversation.unreadCount)")
-            }
+            print("[ConversationsViewModel] refreshLocalItems fetched \(fetched.count) conversations: \(fetched.map { $0.id })")
             items = fetched
             updatePresenceObservers()
         } catch {

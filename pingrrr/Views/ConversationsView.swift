@@ -86,17 +86,25 @@ struct ConversationsView: View {
                     activeSheet = nil
                 }
             case .newConversation:
-                NewConversationSheet(appServices: appServices) { response, displayTitle in
+                NewConversationSheet(appServices: appServices) { response, displayTitle, currentUserID in
                     activeSheet = nil
                     guard let response else { return }
 
-                    let placeholder = ConversationRoute(
+                    let placeholderRoute = ConversationRoute(
                         id: response.conversationId,
                         title: displayTitle,
                         participantIDs: response.participantIds
                     )
 
-                    openConversation(with: placeholder)
+                    // Optimistically append so the list shows the new conversation
+                    viewModel.appendPlaceholderConversation(
+                        id: response.conversationId,
+                        title: displayTitle,
+                        participantIDs: response.participantIds,
+                        currentUserID: currentUserID
+                    )
+
+                    openConversation(with: placeholderRoute)
 
                     Task {
                         await viewModel.refresh()

@@ -41,6 +41,10 @@ final class AppServices: ObservableObject {
     private var modelContext: ModelContext?
     private var hasConfigured = false
 
+    var sharedModelContext: ModelContext? {
+        modelContext
+    }
+
     func configure(modelContext: ModelContext) async {
         if modelContext !== self.modelContext {
             self.modelContext = modelContext

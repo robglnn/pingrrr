@@ -43,12 +43,15 @@ final class ChatViewModel: ObservableObject {
     }
 
     func start() {
+        print("[ChatViewModel] start conversationID=\(conversationID)")
         messageSyncService.start(
             conversationID: conversationID,
             userID: currentUserID,
             modelContext: modelContext
         ) { [weak self] in
-            self?.loadCachedMessages()
+            guard let self else { return }
+            print("[ChatViewModel] Message sync emitted change for \(self.conversationID)")
+            self.loadCachedMessages()
         }
 
         typingIndicatorService.startMonitoring(
@@ -201,6 +204,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     func loadCachedMessages() {
+        print("[ChatViewModel] loadCachedMessages conversationID=\(conversationID)")
         let descriptor = FetchDescriptor<MessageEntity>(
             predicate: #Predicate { $0.conversationID == conversationID },
             sortBy: [SortDescriptor(\.timestamp, order: .forward)]
@@ -216,7 +220,10 @@ final class ChatViewModel: ObservableObject {
         )
         if let fetched = try? modelContext.fetch(descriptor).first {
             conversation = fetched
+            print("[ChatViewModel] refreshed conversation reference: \(fetched)")
             observePresence()
+        } else {
+            print("[ChatViewModel] No conversation entity found locally for \(conversationID)")
         }
     }
 
@@ -230,7 +237,10 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func observePresence() {
-        guard let conversation else { return }
+        guard let conversation else {
+            print("[ChatViewModel] observePresence missing conversation")
+            return
+        }
         let participants = conversation.participantIDs.filter { $0 != currentUserID }
         guard !participants.isEmpty else {
             presenceSnapshot = nil
@@ -238,6 +248,7 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
+        print("[ChatViewModel] observePresence participants=\(participants)")
         presenceService.observe(userIDs: participants)
         presenceSnapshot = presenceSnapshot(for: participants)
     }
