@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import Combine
 import FirebaseAuth
+import FirebaseFirestore
 
 struct RootContainerView: View {
     @Environment(\.modelContext) private var modelContext
@@ -36,6 +37,7 @@ final class AppServices: ObservableObject {
     let notificationService = NotificationService.shared
     let networkMonitor = NetworkMonitor()
     lazy var outgoingMessageQueue = OutgoingMessageQueue(networkMonitor: networkMonitor)
+    let conversationService = ConversationService()
 
     private var modelContext: ModelContext?
     private var hasConfigured = false
@@ -109,7 +111,26 @@ final class AppServices: ObservableObject {
     }
 
     private func cacheAuthenticatedUser(_ user: AuthenticatedUser) async {
-        // TODO: Sync user profile into SwiftData cache
+        let firestore = Firestore.firestore()
+        var data: [String: Any] = [
+            "uid": user.id,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        if let email = user.email {
+            data["email"] = email
+            data["emailLower"] = email.lowercased()
+        }
+
+        if let displayName = user.displayName {
+            data["displayName"] = displayName
+        }
+
+        do {
+            try await firestore.collection("users").document(user.id).setData(data, merge: true)
+        } catch {
+            print("[AppServices] Failed to cache user: \(error)")
+        }
     }
 }
 
