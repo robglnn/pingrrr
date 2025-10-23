@@ -56,6 +56,27 @@ final class ConversationsViewModel: ObservableObject {
         notificationObserver = nil
     }
 
+    func ensureConversationAvailable(conversationID: String) async {
+        if items.contains(where: { $0.id == conversationID }) {
+            return
+        }
+
+        await refresh()
+
+        if items.contains(where: { $0.id == conversationID }) {
+            return
+        }
+
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            refreshLocalItems()
+            if items.contains(where: { $0.id == conversationID }) {
+                return
+            }
+        }
+    }
+
     func markConversationAsRead(_ conversation: ConversationEntity) async {
         guard let userID = appServices.authService.currentUserID else { return }
         let docRef = Firestore.firestore().collection("conversations").document(conversation.id)

@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseAuth
+import FirebaseFirestore
 import GoogleSignIn
 import UIKit
 
@@ -28,6 +29,10 @@ final class AuthService {
 
     var currentUserDisplayName: String? {
         Auth.auth().currentUser?.displayName
+    }
+
+    func currentUserUID() -> String? {
+        Auth.auth().currentUser?.uid
     }
 
     func startListening(_ handler: @escaping (SessionEvent) -> Void) {

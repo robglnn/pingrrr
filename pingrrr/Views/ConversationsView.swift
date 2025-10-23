@@ -6,10 +6,10 @@ struct ConversationsView: View {
     @Environment(\.modelContext) private var modelContext
     @ObservedObject private var viewModel: ConversationsViewModel
 
-    @State private var isPresentingSettings = false
     @State private var navigationPath: [String] = []
     @State private var activeNotification: NotificationService.ChatNotification?
     @State private var notificationDismissTask: Task<Void, Never>?
+    @State private var activeSheet: ActiveSheet?
 
     private let appServices: AppServices
 
@@ -82,6 +82,21 @@ struct ConversationsView: View {
         .onReceive(appServices.notificationService.$lastNotification.compactMap { $0 }) { notification in
             presentNotification(notification)
         }
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .settings:
+                SettingsSheet(appServices: appServices) {
+                    activeSheet = nil
+                }
+            case .newConversation:
+                NewConversationSheet(appServices: appServices) { newConversationID in
+                    activeSheet = nil
+                    if let id = newConversationID {
+                        openConversation(withID: id)
+                    }
+                }
+            }
+        }
     }
 
     private var backgroundGradient: some View {
@@ -110,7 +125,7 @@ struct ConversationsView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             Button {
-                isPresentingSettings = true
+                activeSheet = .settings
             } label: {
                 Image(systemName: "line.3.horizontal")
                     .imageScale(.large)
@@ -119,11 +134,23 @@ struct ConversationsView: View {
 
         ToolbarItem(placement: .topBarTrailing) {
             Button {
-                // TODO: Present new conversation creator
+                activeSheet = .newConversation
             } label: {
                 Image(systemName: "square.and.pencil")
                     .imageScale(.large)
             }
+        }
+    }
+}
+
+private enum ActiveSheet: Identifiable {
+    case settings
+    case newConversation
+
+    var id: Int {
+        switch self {
+        case .settings: return 0
+        case .newConversation: return 1
         }
     }
 }

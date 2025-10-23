@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseFunctions
+import FirebaseFirestore
 
 struct ConversationCreationResponse: Decodable {
     let conversationId: String
@@ -9,6 +10,7 @@ struct ConversationCreationResponse: Decodable {
 
 final class ConversationService {
     private let functions = Functions.functions()
+    private let db = Firestore.firestore()
 
     func createConversation(participantEmails: [String], title: String?) async throws -> ConversationCreationResponse {
         let callable = functions.httpsCallable("createConversation")
@@ -30,6 +32,23 @@ final class ConversationService {
             participantIds: participantIds,
             type: type
         )
+    }
+
+    func awaitConversation(conversationID: String) async {
+        let docRef = db.collection("conversations").document(conversationID)
+        if let existing = try? await docRef.getDocument(), existing.exists {
+            return
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        let listener = docRef.addSnapshotListener { snapshot, _ in
+            if let snapshot, snapshot.exists {
+                semaphore.signal()
+            }
+        }
+
+        _ = semaphore.wait(timeout: .now() + 3)
+        listener.remove()
     }
 }
 

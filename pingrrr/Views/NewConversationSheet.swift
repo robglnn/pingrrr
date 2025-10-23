@@ -1,5 +1,4 @@
 import SwiftUI
-import FirebaseFirestore
 import FirebaseFunctions
 
 struct NewConversationSheet: View {
@@ -87,6 +86,8 @@ struct NewConversationSheet: View {
                     participantEmails: entries,
                     title: conversationTitle
                 )
+
+                await appServices.conversationService.awaitConversation(conversationID: response.conversationId)
 
                 await MainActor.run {
                     resetForm()
