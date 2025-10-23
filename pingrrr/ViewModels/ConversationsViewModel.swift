@@ -28,7 +28,9 @@ final class ConversationsViewModel: ObservableObject {
 
     func start() {
         guard let userID = appServices.authService.currentUserID else { return }
+        print("[ConversationsViewModel] Starting sync service for user: \(userID)")
         syncService.start(for: userID, modelContext: modelContext) { [weak self] in
+            print("[ConversationsViewModel] Sync service started, refreshing local items")
             self?.refreshLocalItems()
         }
 
@@ -57,24 +59,33 @@ final class ConversationsViewModel: ObservableObject {
     }
 
     func ensureConversationAvailable(conversationID: String) async {
+        print("[ConversationsViewModel] Ensuring conversation available: \(conversationID)")
+        print("[ConversationsViewModel] Current conversations: \(items.map { $0.id })")
+
         if items.contains(where: { $0.id == conversationID }) {
+            print("[ConversationsViewModel] Conversation already available")
             return
         }
 
+        print("[ConversationsViewModel] Refreshing conversations...")
         await refresh()
 
         if items.contains(where: { $0.id == conversationID }) {
+            print("[ConversationsViewModel] Conversation now available after refresh")
             return
         }
 
+        print("[ConversationsViewModel] Still not found, waiting...")
         let deadline = Date().addingTimeInterval(3)
         while Date() < deadline {
             try? await Task.sleep(nanoseconds: 200_000_000)
             refreshLocalItems()
             if items.contains(where: { $0.id == conversationID }) {
+                print("[ConversationsViewModel] Conversation found after waiting")
                 return
             }
         }
+        print("[ConversationsViewModel] Conversation not found after waiting: \(conversationID)")
     }
 
     func markConversationAsRead(_ conversation: ConversationEntity) async {
@@ -97,9 +108,16 @@ final class ConversationsViewModel: ObservableObject {
         let descriptor = FetchDescriptor<ConversationEntity>(
             sortBy: [SortDescriptor(\.lastMessageTimestamp, order: .reverse)]
         )
-        if let fetched = try? modelContext.fetch(descriptor) {
+        do {
+            let fetched = try modelContext.fetch(descriptor)
+            print("[ConversationsViewModel] refreshLocalItems fetched \(fetched.count) conversations")
+            fetched.forEach { conversation in
+                print("[ConversationsViewModel] Conversation: id=\(conversation.id), title=\(conversation.title ?? "nil"), lastMessageTimestamp=\(String(describing: conversation.lastMessageTimestamp)), unread=\(conversation.unreadCount)")
+            }
             items = fetched
             updatePresenceObservers()
+        } catch {
+            print("[ConversationsViewModel] Failed to fetch conversations: \(error)")
         }
     }
 
@@ -150,8 +168,7 @@ final class ConversationsViewModel: ObservableObject {
             return
         }
 
-        if let userID = appServices.authService.currentUserID,
-           conversation.unreadCount == 0 {
+        if conversation.unreadCount == 0 {
             Task {
                 await markConversationAsRead(conversation)
             }

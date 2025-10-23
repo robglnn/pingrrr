@@ -18,6 +18,7 @@ final class NotificationService: NSObject, ObservableObject {
         let senderName: String
         let body: String
         let timestamp: Date
+        let conversationTitle: String?
     }
 
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
@@ -119,7 +120,8 @@ final class NotificationService: NSObject, ObservableObject {
             senderID: senderID,
             senderName: senderName,
             body: body,
-            timestamp: timestamp
+            timestamp: timestamp,
+            conversationTitle: userInfo["conversationTitle"] as? String
         )
     }
 }

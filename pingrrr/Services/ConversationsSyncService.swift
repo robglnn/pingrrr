@@ -16,6 +16,7 @@ final class ConversationsSyncService {
         self.modelContext = modelContext
         self.onChange = onChange
 
+        print("[ConversationsSync] Starting listener for user: \(userID)")
         listener = db.collection("conversations")
             .whereField("participants", arrayContains: userID)
             .addSnapshotListener { [weak self] snapshot, error in
@@ -27,6 +28,11 @@ final class ConversationsSyncService {
                 }
 
                 guard let snapshot else { return }
+
+                print("[ConversationsSync] Received \(snapshot.documentChanges.count) changes")
+                for change in snapshot.documentChanges {
+                    print("[ConversationsSync] Change: \(change.type.rawValue) for document: \(change.document.documentID)")
+                }
 
                 Task { @MainActor in
                     await self.processChanges(snapshot.documentChanges)
@@ -56,20 +62,30 @@ final class ConversationsSyncService {
     }
 
     private func processChanges(_ changes: [DocumentChange]) async {
-        guard let modelContext else { return }
+        guard let modelContext, let currentUserID else { return }
+
+        print("[ConversationsSync] Processing \(changes.count) changes for user: \(currentUserID)")
 
         do {
             for change in changes {
+                print("[ConversationsSync] Change: \(change.type.rawValue) for doc: \(change.document.documentID)")
                 switch change.type {
                 case .added, .modified:
                     let record = try change.document.data(as: ConversationRecord.self)
-                    upsert(record, in: modelContext)
+                    print("[ConversationsSync] Adding/updating conversation: \(change.document.documentID)")
+                    upsert(change.document.documentID, record: record, in: modelContext)
                 case .removed:
-                    let record = try change.document.data(as: ConversationRecord.self)
-                    remove(recordID: record.id, in: modelContext)
+                    print("[ConversationsSync] Removing conversation: \(change.document.documentID)")
+                    remove(recordID: change.document.documentID, in: modelContext)
                 }
             }
-            try modelContext.save()
+            do {
+                try modelContext.save()
+                print("[ConversationsSync] Saved changes to model context")
+            } catch {
+                print("[ConversationsSync] Failed to save model context: \(error)")
+                throw error
+            }
             onChange?()
         } catch {
             print("[ConversationsSync] Change processing failed: \(error)")
@@ -81,14 +97,22 @@ final class ConversationsSyncService {
 
         for document in documents {
             let record = try document.data(as: ConversationRecord.self)
-            upsert(record, in: modelContext)
+            upsert(document.documentID, record: record, in: modelContext)
         }
-        try modelContext.save()
+        do {
+            try modelContext.save()
+            print("[ConversationsSync] Saved snapshot changes to model context")
+        } catch {
+            print("[ConversationsSync] Failed to save snapshot changes: \(error)")
+            throw error
+        }
         onChange?()
     }
 
-    private func upsert(_ record: ConversationRecord, in context: ModelContext) {
-        guard let identifier = record.id else { return }
+    private func upsert(_ documentID: String, record: ConversationRecord, in context: ModelContext) {
+        let identifier = documentID
+
+        print("[ConversationsSync] Upserting conversation \(identifier) with title: \(record.title ?? "nil") participants: \(record.participants)")
 
         let descriptor = FetchDescriptor<ConversationEntity>(
             predicate: #Predicate { $0.id == identifier }
@@ -120,7 +144,10 @@ final class ConversationsSyncService {
         }
 
         if entity.persistentModelID == nil {
+            print("[ConversationsSync] Inserting new conversation entity for id \(identifier)")
             context.insert(entity)
+        } else {
+            print("[ConversationsSync] Updating existing conversation entity for id \(identifier)")
         }
     }
 
@@ -141,17 +168,22 @@ private struct ConversationRecord: Codable {
     var id: String?
     var title: String?
     var participants: [String]
-    var type: ConversationType?
+    var typeRawValue: String?
     var lastMessageID: String?
     var lastMessagePreview: String?
     var lastMessageTimestamp: Date?
     var unreadCounts: [String: Int]?
 
+    var type: ConversationType? {
+        guard let typeRawValue else { return nil }
+        return ConversationType(rawValue: typeRawValue)
+    }
+
     init(
         id: String? = nil,
         title: String? = nil,
         participants: [String] = [],
-        type: ConversationType? = nil,
+        typeRawValue: String? = nil,
         lastMessageID: String? = nil,
         lastMessagePreview: String? = nil,
         lastMessageTimestamp: Date? = nil,
@@ -160,11 +192,48 @@ private struct ConversationRecord: Codable {
         self.id = id
         self.title = title
         self.participants = participants
-        self.type = type
+        self.typeRawValue = typeRawValue
         self.lastMessageID = lastMessageID
         self.lastMessagePreview = lastMessagePreview
         self.lastMessageTimestamp = lastMessageTimestamp
         self.unreadCounts = unreadCounts
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        // Document ID is not in the JSON, it's the document name
+        id = nil
+
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        participants = try container.decode([String].self, forKey: .participants)
+        typeRawValue = try container.decodeIfPresent(String.self, forKey: .typeRawValue)
+        lastMessageID = try container.decodeIfPresent(String.self, forKey: .lastMessageID)
+        lastMessagePreview = try container.decodeIfPresent(String.self, forKey: .lastMessagePreview)
+
+        // Handle timestamp decoding
+        if let timestamp = try? container.decodeIfPresent(Timestamp.self, forKey: .lastMessageTimestamp) {
+            lastMessageTimestamp = timestamp.dateValue()
+        } else {
+            lastMessageTimestamp = nil
+        }
+
+        // Handle unreadCounts as [String: Int]
+        if let unreadCountsMap = try? container.decodeIfPresent([String: Int].self, forKey: .unreadCounts) {
+            unreadCounts = unreadCountsMap
+        } else {
+            unreadCounts = nil
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case title
+        case participants
+        case typeRawValue = "type"
+        case lastMessageID = "lastMessageID"
+        case lastMessagePreview = "lastMessagePreview"
+        case lastMessageTimestamp = "lastMessageTimestamp"
+        case unreadCounts = "unreadCounts"
     }
 }
 

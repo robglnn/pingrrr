@@ -3,25 +3,20 @@ import SwiftData
 import Combine
 
 struct ConversationsView: View {
-    @Environment(\.modelContext) private var modelContext
     @ObservedObject private var viewModel: ConversationsViewModel
 
-    @State private var navigationPath: [String] = []
+    @State private var navigationPath: [ConversationRoute] = []
     @State private var activeNotification: NotificationService.ChatNotification?
     @State private var notificationDismissTask: Task<Void, Never>?
     @State private var activeSheet: ActiveSheet?
 
     private let appServices: AppServices
+    private let modelContext: ModelContext
 
-    init(appServices: AppServices, modelContext: ModelContext? = nil) {
+    init(appServices: AppServices, modelContext: ModelContext) {
         self.appServices = appServices
-        if let modelContext {
-            _viewModel = ObservedObject(initialValue: ConversationsViewModel(modelContext: modelContext, appServices: appServices))
-        } else {
-            let container = try! ModelContainer(for: UserEntity.self, ConversationEntity.self, MessageEntity.self)
-            let context = container.mainContext
-            _viewModel = ObservedObject(initialValue: ConversationsViewModel(modelContext: context, appServices: appServices))
-        }
+        self.modelContext = modelContext
+        _viewModel = ObservedObject(initialValue: ConversationsViewModel(modelContext: modelContext, appServices: appServices))
     }
 
     var body: some View {
@@ -35,7 +30,7 @@ struct ConversationsView: View {
                 } else {
                     List {
                         ForEach(viewModel.items) { conversation in
-                            NavigationLink(value: conversation.id) {
+                            NavigationLink(value: ConversationRoute(from: conversation)) {
                                 ConversationRow(
                                     conversation: conversation,
                                     presence: presenceData(for: conversation)
@@ -53,26 +48,28 @@ struct ConversationsView: View {
             .refreshable { await viewModel.refresh() }
             .task { viewModel.start() }
             .onDisappear { viewModel.stop() }
-            .navigationDestination(for: String.self) { conversationID in
-                if let conversation = viewModel.items.first(where: { $0.id == conversationID }),
-                   let userID = appServices.authService.currentUserID {
-                    ChatView(
-                        conversation: conversation,
-                        currentUserID: userID,
-                        modelContext: modelContext,
-                        appServices: appServices
-                    )
-                    .environment(\.modelContext, modelContext)
-                } else {
-                    Text("Unable to load conversation")
-                        .foregroundStyle(.secondary)
+            .navigationDestination(for: ConversationRoute.self) { route in
+                ChatView(
+                    conversation: placeholderConversation(from: route, modelContext: modelContext),
+                    currentUserID: appServices.authService.currentUserID ?? "",
+                    modelContext: modelContext,
+                    appServices: appServices
+                )
+                .environment(\.modelContext, modelContext)
+                .task {
+                    await viewModel.ensureConversationAvailable(conversationID: route.id)
                 }
             }
         }
         .overlay(alignment: .top) {
             if let notification = activeNotification {
                 NotificationBannerView(notification: notification) {
-                    openConversation(withID: notification.conversationID)
+                    let route = ConversationRoute(
+                        id: notification.conversationID,
+                        title: notification.conversationTitle,
+                        participantIDs: []
+                    )
+                    openConversation(with: route)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
@@ -89,10 +86,20 @@ struct ConversationsView: View {
                     activeSheet = nil
                 }
             case .newConversation:
-                NewConversationSheet(appServices: appServices) { newConversationID in
+                NewConversationSheet(appServices: appServices) { response, displayTitle in
                     activeSheet = nil
-                    if let id = newConversationID {
-                        openConversation(withID: id)
+                    guard let response else { return }
+
+                    let placeholder = ConversationRoute(
+                        id: response.conversationId,
+                        title: displayTitle,
+                        participantIDs: response.participantIds
+                    )
+
+                    openConversation(with: placeholder)
+
+                    Task {
+                        await viewModel.refresh()
                     }
                 }
             }
@@ -264,12 +271,49 @@ private extension ConversationsView {
         }
     }
 
-    private func openConversation(withID id: String) {
+    private func openConversation(with conversation: ConversationRoute) {
         activeNotification = nil
-        if !navigationPath.contains(id) {
-            navigationPath.append(id)
+        if !navigationPath.contains(conversation) {
+            navigationPath.append(conversation)
         }
     }
+}
+
+private struct ConversationRoute: Hashable, Codable {
+    let id: String
+    let title: String?
+    let participantIDs: [String]
+
+    init(id: String, title: String?, participantIDs: [String]) {
+        self.id = id
+        self.title = title
+        self.participantIDs = participantIDs
+    }
+
+    init(from conversation: ConversationEntity) {
+        self.init(id: conversation.id, title: conversation.title, participantIDs: conversation.participantIDs)
+    }
+}
+
+private func placeholderConversation(from route: ConversationRoute, modelContext: ModelContext) -> ConversationEntity {
+    let descriptor = FetchDescriptor<ConversationEntity>(
+        predicate: #Predicate { $0.id == route.id }
+    )
+
+    if let existing = try? modelContext.fetch(descriptor).first {
+        return existing
+    }
+
+    return ConversationEntity(
+        id: route.id,
+        title: route.title,
+        participantIDs: route.participantIDs,
+        type: .oneOnOne,
+        lastMessageID: nil,
+        lastMessagePreview: nil,
+        lastMessageTimestamp: Date(),
+        unreadCount: 0
+    )
 }
 
 private struct NotificationBannerView: View {

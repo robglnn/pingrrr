@@ -13,8 +13,7 @@ struct RootContainerView: View {
     var body: some View {
         Group {
             if appServices.sessionState == .authenticated {
-                ConversationsView(appServices: appServices)
-                    .environment(\.modelContext, modelContext)
+                ConversationsView(appServices: appServices, modelContext: modelContext)
             } else {
                 AuthenticationFlowView(appServices: appServices)
             }
