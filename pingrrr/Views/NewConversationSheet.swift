@@ -7,9 +7,11 @@ struct NewConversationSheet: View {
     let onDismiss: (ConversationCreationResponse?, String?, String) -> Void
 
     @State private var conversationTitle: String = ""
-    @State private var participantInput: String = ""
+    @State private var participantFields: [String] = [""]
     @State private var isCreating = false
     @State private var errorMessage: String?
+
+    private let maxParticipants = 5
 
     init(appServices: AppServices, onDismiss: @escaping (ConversationCreationResponse?, String?, String) -> Void) {
         _appServices = ObservedObject(initialValue: appServices)
@@ -25,10 +27,36 @@ struct NewConversationSheet: View {
                 }
 
                 Section("Participants") {
-                    TextField("Participant emails or IDs (comma separated)", text: $participantInput, axis: .vertical)
-                        .lineLimit(1...4)
+                    ForEach(Array(participantFields.enumerated()), id: \.offset) { index, _ in
+                        HStack(alignment: .center, spacing: 12) {
+                            TextField("Participant email or ID", text: Binding(
+                                get: { participantFields[index] },
+                                set: { participantFields[index] = $0 }
+                            ))
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
 
-                    Text("Include at least one other participant. Enter either their email or user ID. Your account is automatically added.")
+                            if participantFields.count > 1 {
+                                Button(role: .destructive) {
+                                    removeParticipantField(at: index)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                    }
+
+                    if participantFields.count < maxParticipants {
+                        Button {
+                            addParticipantField()
+                        } label: {
+                            Label("Add Participant", systemImage: "plus.circle")
+                        }
+                    }
+
+                    Text("Add up to \(maxParticipants) participants by email or user ID. Your account is always included.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -68,10 +96,7 @@ struct NewConversationSheet: View {
             return
         }
 
-        let entries = participantInput
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let entries = cleanedParticipants()
 
         guard !entries.isEmpty else {
             errorMessage = ConversationCreationError.missingParticipants.errorDescription
@@ -116,7 +141,7 @@ struct NewConversationSheet: View {
     @MainActor
     private func resetForm() {
         conversationTitle = ""
-        participantInput = ""
+        participantFields = [""]
     }
 
     @MainActor
@@ -173,6 +198,39 @@ struct NewConversationSheet: View {
         for id in combined where !result.contains(id) {
             result.append(id)
         }
+        return result
+    }
+
+    private func addParticipantField() {
+        guard participantFields.count < maxParticipants else { return }
+        participantFields.append("")
+    }
+
+    private func removeParticipantField(at index: Int) {
+        guard participantFields.indices.contains(index) else { return }
+        participantFields.remove(at: index)
+        if participantFields.isEmpty {
+            participantFields = [""]
+        }
+    }
+
+    private func cleanedParticipants() -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+
+        for value in participantFields {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if !seen.contains(trimmed.lowercased()) {
+                seen.insert(trimmed.lowercased())
+                result.append(trimmed)
+            }
+        }
+
+        if result.count > maxParticipants {
+            result = Array(result.prefix(maxParticipants))
+        }
+
         return result
     }
 

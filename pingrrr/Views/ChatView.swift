@@ -118,13 +118,35 @@ struct ChatView: View {
                 .padding(.vertical, 8)
             }
             .background(Color.black)
-            .onChange(of: viewModel.messages.count) { _, _ in
-                if let lastID = viewModel.messages.last?.id {
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        proxy.scrollTo(lastID, anchor: .bottom)
-                    }
-                }
+            .onAppear {
+                scrollToBottom(proxy: proxy, animated: false, delayed: true)
             }
+            .onChange(of: viewModel.messages.count) { _, _ in
+                scrollToBottom(proxy: proxy, animated: true, delayed: false)
+            }
+            .onChange(of: viewModel.messages.last?.id) { _, _ in
+                scrollToBottom(proxy: proxy, animated: true, delayed: false)
+            }
+        }
+    }
+
+    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool, delayed: Bool) {
+        guard let lastID = viewModel.messages.last?.id else { return }
+
+        let executeScroll = {
+            if animated {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(lastID, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
+        }
+
+        if delayed {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: executeScroll)
+        } else {
+            DispatchQueue.main.async(execute: executeScroll)
         }
     }
 

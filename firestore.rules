@@ -1,9 +1,42 @@
 rules_version = "2";
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow all operations for development
-    match /{document=**} {
-      allow read, write: if true;
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isConversationParticipant(conversationId) {
+      return exists(/databases/$(database)/documents/conversations/$(conversationId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+    }
+
+    match /conversations/{conversationId} {
+      allow read, update, delete: if isSignedIn() && isConversationParticipant(conversationId);
+
+      allow create: if isSignedIn() &&
+        request.resource.data.participants is list &&
+        request.resource.data.participants.size() > 0 &&
+        request.auth.uid in request.resource.data.participants;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && isConversationParticipant(conversationId);
+        allow create: if isSignedIn() && isConversationParticipant(conversationId) &&
+          request.resource.data.senderID == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      match /metadata/{docId} {
+        allow read, write: if isSignedIn() && isConversationParticipant(conversationId);
+      }
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && userId == request.auth.uid;
+      allow write: if isSignedIn() && userId == request.auth.uid;
+    }
+
+    match /presence/{userId} {
+      allow read, write: if isSignedIn() && userId == request.auth.uid;
     }
   }
 }
