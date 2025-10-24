@@ -126,6 +126,7 @@ struct ChatView: View {
             }
             .onChange(of: viewModel.messages.last?.id) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true, delayed: false)
+                Task { await viewModel.markMessagesAsRead() }
             }
         }
     }

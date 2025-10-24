@@ -155,6 +155,8 @@ final class MessageSyncService {
         entity.retryCount = 0
         entity.nextRetryTimestamp = nil
 
+        updateStatus(for: entity, record: record)
+
         updateConversationMetadata(with: record, changeType: changeType, isInitialLoad: isInitialLoad, in: context)
     }
 
@@ -195,6 +197,35 @@ final class MessageSyncService {
            let currentUserID = currentUserID,
            let unreadCounts = record.unreadCounts {
             conversation.unreadCount = unreadCounts[currentUserID] ?? conversation.unreadCount
+        }
+    }
+
+    private func updateStatus(for entity: MessageEntity, record: MessageRecord) {
+        guard let conversationID = record.conversationID ?? conversationID else { return }
+        guard let modelContext else { return }
+
+        let descriptor = FetchDescriptor<ConversationEntity>(
+            predicate: #Predicate { $0.id == conversationID }
+        )
+
+        guard let conversation = try? modelContext.fetch(descriptor).first else { return }
+        let participants = conversation.participantIDs
+        guard !participants.isEmpty else { return }
+
+        let senderID = entity.senderID
+        let recipients = participants.filter { $0 != senderID }
+        guard !recipients.isEmpty else { return }
+
+        let readBy = Set(entity.readBy)
+        let delivered = recipients.contains { readBy.contains($0) }
+        let allRead = recipients.allSatisfy { readBy.contains($0) }
+
+        if allRead {
+            entity.status = .read
+        } else if delivered {
+            entity.status = .delivered
+        } else if entity.status == .sending {
+            entity.status = .sent
         }
     }
 }
