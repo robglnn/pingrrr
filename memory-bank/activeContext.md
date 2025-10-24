@@ -1,25 +1,25 @@
 # Active Context – Pingrrr
 
-## Current Focus (Oct 21, 2025)
-- Drive MVP implementation forward with emphasis on reliability, presence, notifications, AI assistance, and group collaboration.
-- Harden offline/online sync paths while polishing realtime experience to hit performance targets.
-- Ensure work stays aligned with `MVPtasks.md`, `MVPcriticalrequirements.md`, and rubric KPIs (sub-200 ms delivery, 60 FPS, <2 s launch).
+## Current Focus (Oct 24, 2025)
+- Ship MVP-critical messaging refinements (profile editing, smart message display, local chat deletion, read receipts, media/voice pipelines).
+- Maintain reliability and low-latency sync while layering new UX polish.
+- Keep work aligned with `MVPtasks.md`, `MVPcriticalrequirements.md`, and performance rubric targets.
 
 ## Recent Actions
-- Implemented SwiftData-backed outgoing message queue with retry backoff and presence indicators across the app.
-- Added Google Sign-In support alongside email/password using Firebase Auth, including UI button and credential handling.
+- Delivered profile management: profile photo upload via Firebase Storage, display name editing, rules deployed, callable function wired.
+- Implemented WhatsApp-style message grouping in chat view with sender name/avatar logic and profile prefetching.
+- Hardened foreground notification pipeline for new messages and verified clean builds post-integration.
 
 ## Immediate Next Steps
-- Finish offline resilience: persist outgoing messages in SwiftData, retry with exponential backoff, and reconcile local/remote state on reconnect.
-- Surface presence: render online/offline indicators and last-seen timestamps in `ConversationsView` and `ChatView`.
-- Flesh out notifications: implement foreground FCM handling and ensure Cloud Function triggers fire for new messages.
-- Integrate required AI features (translation, tone, cultural context, slang explanations) via Cloud Functions + Vercel AI SDK.
-- Add group chat creation/management UI with editable metadata (participants, titles).
-- Polish/test: rapid-fire messaging, offline scenarios, backgrounding, push reception, performance (<2 s launch, 60 FPS).
+- Add swipe-to-delete conversations (local only) with confirmation flow.
+- Build read receipts UI (overlapping avatars + popover) and ensure data pipeline is ready.
+- Implement media sharing pipeline with caching, camera/library pickers, and background fetches.
+- Develop voice message capture/playback (30s cap, read on play, auto-delete warning) leveraging `VoiceMessageService` scaffolding.
+- Expand testing matrix: new chat creation, grouped message rendering, profile updates, media uploads, offline delivery.
 
 ## Key Considerations
-- Prioritize performance targets: <200 ms message delivery, <2 s launch, 60 FPS interactions.
-- Maintain dark-mode aesthetic consistent with Signal/X inspirations.
-- Ensure architecture supports upcoming AI features without major refactors.
-- Prepare for required test scenarios (offline, background/foreground, rapid-fire messaging, group chat).
+- Preserve sub-200 ms delivery by keeping snapshot listeners scoped and caches efficient.
+- Ensure dark-mode visual consistency (avatars, bubbles, toasts) across new UI elements.
+- Coordinate Firebase rules/functions deployment as new media/voice features come online.
+- Monitor SwiftData persistence for grouped view alignment to avoid duplicate rendering or stale reads.
 

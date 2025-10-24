@@ -112,10 +112,8 @@ final class ConversationsViewModel: ObservableObject {
             unreadCount: 0
         )
 
-        if placeholder.persistentModelID == nil {
-            modelContext.insert(placeholder)
-            try? modelContext.save()
-        }
+        modelContext.insert(placeholder)
+        try? modelContext.save()
 
         items.insert(placeholder, at: 0)
         let otherParticipants = participantIDs.filter { $0 != currentUserID }
@@ -143,6 +141,23 @@ final class ConversationsViewModel: ObservableObject {
         if let index = items.firstIndex(where: { $0.id == id }) {
             items.remove(at: index)
         }
+
+        let descriptor = FetchDescriptor<ConversationPreferenceEntity>(
+            predicate: #Predicate { $0.conversationID == id }
+        )
+
+        if let preference = try? modelContext.fetch(descriptor).first {
+            preference.isHidden = true
+        } else {
+            let preference = ConversationPreferenceEntity(conversationID: id, isHidden: true)
+            modelContext.insert(preference)
+        }
+
+        try? modelContext.save()
+
+        Task {
+            await updateHiddenFlag(for: id, hidden: true)
+        }
     }
 
     private func refreshLocalItems() {
@@ -152,7 +167,7 @@ final class ConversationsViewModel: ObservableObject {
         do {
             let fetched = try modelContext.fetch(descriptor)
             print("[ConversationsViewModel] refreshLocalItems fetched \(fetched.count) conversations: \(fetched.map { $0.id })")
-            items = fetched
+            items = applyPreferences(to: fetched)
             updatePresenceObservers()
         } catch {
             print("[ConversationsViewModel] Failed to fetch conversations: \(error)")
@@ -254,8 +269,9 @@ final class ConversationsViewModel: ObservableObject {
             try? modelContext.save()
         }
 
-        items = allConversations.filter { $0.participantIDs.contains(currentUserID) }
+        let filtered = allConversations.filter { $0.participantIDs.contains(currentUserID) }
             .sorted(by: conversationSort)
+        items = applyPreferences(to: filtered)
     }
 
     private func conversationSort(_ lhs: ConversationEntity, _ rhs: ConversationEntity) -> Bool {
@@ -267,6 +283,42 @@ final class ConversationsViewModel: ObservableObject {
         }
 
         return lhsTimestamp > rhsTimestamp
+    }
+
+    private func applyPreferences(to conversations: [ConversationEntity]) -> [ConversationEntity] {
+        let descriptor = FetchDescriptor<ConversationPreferenceEntity>()
+        let preferences = (try? modelContext.fetch(descriptor)) ?? []
+        let preferenceMap = Dictionary(uniqueKeysWithValues: preferences.map { ($0.conversationID, $0) })
+        var visible: [ConversationEntity] = []
+        for conversation in conversations {
+            if let pref = preferenceMap[conversation.id] {
+                if pref.isHidden {
+                    continue
+                } else {
+                    conversation.hiddenForUserIDs = []
+                }
+            }
+            visible.append(conversation)
+        }
+        return visible.sorted(by: conversationSort)
+    }
+
+    private func updateHiddenFlag(for conversationID: String, hidden: Bool) async {
+        guard let userID = appServices.authService.currentUserID else { return }
+        let docRef = Firestore.firestore().collection("conversations").document(conversationID)
+        do {
+            if hidden {
+                try await docRef.updateData([
+                    "hiddenFor": FieldValue.arrayUnion([userID])
+                ])
+            } else {
+                try await docRef.updateData([
+                    "hiddenFor": FieldValue.arrayRemove([userID])
+                ])
+            }
+        } catch {
+            print("[ConversationsViewModel] Failed to update hidden flag: \(error)")
+        }
     }
 }
 

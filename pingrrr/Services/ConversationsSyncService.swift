@@ -94,6 +94,9 @@ final class ConversationsSyncService {
             case .added, .modified:
                 let record = try change.document.data(as: ConversationRecord.self)
                 let identifier = change.document.documentID
+                if record.hiddenForUserIDs.contains(currentUserID) {
+                    continue
+                }
                 let entity = existingMap[identifier] ?? {
                     let newEntity = ConversationEntity(
                         id: identifier,
@@ -103,7 +106,8 @@ final class ConversationsSyncService {
                         lastMessageID: record.lastMessageID,
                         lastMessagePreview: record.lastMessagePreview,
                         lastMessageTimestamp: record.bestTimestamp ?? Date(),
-                        unreadCount: 0
+                        unreadCount: 0,
+                        hiddenForUserIDs: record.hiddenForUserIDs
                     )
                     modelContext.insert(newEntity)
                     existingMap[identifier] = newEntity
@@ -117,6 +121,7 @@ final class ConversationsSyncService {
                 entity.lastMessagePreview = record.lastMessagePreview
                 entity.lastMessageTimestamp = record.bestTimestamp ?? entity.lastMessageTimestamp ?? Date()
                 entity.unreadCount = record.unreadCounts?[currentUserID] ?? 0
+                entity.hiddenForUserIDs = record.hiddenForUserIDs
 
                 ensureMessageListener(for: identifier, title: entity.title, lastMessageID: entity.lastMessageID)
             case .removed:
@@ -143,6 +148,9 @@ final class ConversationsSyncService {
         for document in documents {
             let record = try document.data(as: ConversationRecord.self)
             let identifier = document.documentID
+            if record.hiddenForUserIDs.contains(currentUserID) {
+                continue
+            }
             seenIdentifiers.insert(identifier)
 
             let entity = existingMap[identifier] ?? {
@@ -154,7 +162,8 @@ final class ConversationsSyncService {
                     lastMessageID: record.lastMessageID,
                     lastMessagePreview: record.lastMessagePreview,
                     lastMessageTimestamp: record.bestTimestamp ?? Date(),
-                    unreadCount: 0
+                    unreadCount: 0,
+                    hiddenForUserIDs: record.hiddenForUserIDs
                 )
                 modelContext.insert(newEntity)
                 existingMap[identifier] = newEntity
@@ -168,6 +177,7 @@ final class ConversationsSyncService {
             entity.lastMessagePreview = record.lastMessagePreview
             entity.lastMessageTimestamp = record.bestTimestamp ?? entity.lastMessageTimestamp ?? Date()
             entity.unreadCount = record.unreadCounts?[currentUserID] ?? 0
+            entity.hiddenForUserIDs = record.hiddenForUserIDs
 
             ensureMessageListener(for: identifier, title: entity.title, lastMessageID: entity.lastMessageID)
         }
@@ -332,6 +342,7 @@ private struct ConversationRecord: Codable {
     var createdAt: Date?
     var lastMessageSenderID: String?
     var senderDisplayName: String?
+    var hiddenForUserIDs: [String]
 
     var type: ConversationType? {
         guard let typeRawValue else { return nil }
@@ -353,7 +364,8 @@ private struct ConversationRecord: Codable {
         unreadCounts: [String: Int]? = nil,
         createdAt: Date? = nil,
         lastMessageSenderID: String? = nil,
-        senderDisplayName: String? = nil
+        senderDisplayName: String? = nil,
+        hiddenForUserIDs: [String] = []
     ) {
         self.id = id
         self.title = title
@@ -366,6 +378,7 @@ private struct ConversationRecord: Codable {
         self.createdAt = createdAt
         self.lastMessageSenderID = lastMessageSenderID
         self.senderDisplayName = senderDisplayName
+        self.hiddenForUserIDs = hiddenForUserIDs
     }
 
     init(from decoder: Decoder) throws {
@@ -399,6 +412,7 @@ private struct ConversationRecord: Codable {
 
         lastMessageSenderID = try container.decodeIfPresent(String.self, forKey: .lastMessageSenderID)
         senderDisplayName = try container.decodeIfPresent(String.self, forKey: .senderDisplayName)
+        hiddenForUserIDs = (try? container.decodeIfPresent([String].self, forKey: .hiddenForUserIDs)) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -412,6 +426,7 @@ private struct ConversationRecord: Codable {
         case createdAt = "createdAt"
         case lastMessageSenderID = "lastMessageSenderID"
         case senderDisplayName = "senderDisplayName"
+        case hiddenForUserIDs = "hiddenFor"
     }
 }
 

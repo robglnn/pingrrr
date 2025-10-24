@@ -10,6 +10,8 @@ struct ConversationsView: View {
     @State private var notificationDismissTask: Task<Void, Never>?
     @State private var activeSheet: ActiveSheet?
     @State private var navigationSubscription: AnyCancellable?
+    @State private var pendingDeletion: ConversationEntity?
+    @State private var isShowingDeleteConfirmation = false
 
     private let appServices: AppServices
     private let modelContext: ModelContext
@@ -41,7 +43,8 @@ struct ConversationsView: View {
                                 .listRowBackground(Color.clear)
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
-                                        Task { await deleteConversation(conversation) }
+                                        pendingDeletion = conversation
+                                        isShowingDeleteConfirmation = true
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
@@ -138,6 +141,20 @@ struct ConversationsView: View {
                 navigationSubscription?.cancel()
                 navigationSubscription = nil
                 NotificationCenter.default.removeObserver(self, name: .navigateToConversation, object: nil)
+            }
+            .confirmationDialog(
+                "Delete chat",
+                isPresented: $isShowingDeleteConfirmation,
+                presenting: pendingDeletion
+            ) { conversation in
+                Button("Delete", role: .destructive) {
+                    Task { await deleteConversationLocally(conversation) }
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDeletion = nil
+                }
+            } message: { _ in
+                Text("This removes the chat from this device only.")
             }
 
             ToastNotificationOverlay(notificationService: appServices.notificationService)
@@ -317,20 +334,6 @@ private extension ConversationsView {
         }
     }
 
-    private func deleteConversation(_ conversation: ConversationEntity) async {
-        let alertTitle = "Delete chat"
-        let alertMessage = "This removes the chat from this device only."
-
-        await MainActor.run {
-            let alert = UIAlertController(title: alertTitle, message: alertMessage, preferredStyle: .actionSheet)
-            alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { _ in
-                Task { await deleteConversationLocally(conversation) }
-            })
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            UIApplication.present(alert: alert)
-        }
-    }
-
     @MainActor
     private func deleteConversationLocally(_ conversation: ConversationEntity) async {
         modelContext.delete(conversation)
@@ -340,6 +343,7 @@ private extension ConversationsView {
         } catch {
             print("[ConversationsView] Failed to delete conversation locally: \(error)")
         }
+        pendingDeletion = nil
     }
 }
 

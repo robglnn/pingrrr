@@ -74,6 +74,7 @@ final class ConversationEntity {
     var lastMessagePreview: String?
     var lastMessageTimestamp: Date?
     var unreadCount: Int
+    var hiddenForUserIDsString: String?
 
     // Temporarily removing relationship for build compatibility
     // @Relationship(deleteRule: .cascade, inverse: \MessageEntity.conversation)
@@ -87,7 +88,8 @@ final class ConversationEntity {
         lastMessageID: String? = nil,
         lastMessagePreview: String? = nil,
         lastMessageTimestamp: Date? = nil,
-        unreadCount: Int = 0
+        unreadCount: Int = 0,
+        hiddenForUserIDs: [String] = []
     ) {
         self.id = id
         self.title = title
@@ -97,6 +99,7 @@ final class ConversationEntity {
         self.lastMessagePreview = lastMessagePreview
         self.lastMessageTimestamp = lastMessageTimestamp
         self.unreadCount = unreadCount
+        self.hiddenForUserIDsString = ConversationEntity.encodeIDs(hiddenForUserIDs)
     }
 
     var type: ConversationType {
@@ -107,6 +110,11 @@ final class ConversationEntity {
     var participantIDs: [String] {
         get { ConversationEntity.decodeIDs(participantIDsString) }
         set { participantIDsString = ConversationEntity.encodeIDs(newValue) }
+    }
+
+    var hiddenForUserIDs: [String] {
+        get { ConversationEntity.decodeIDs(hiddenForUserIDsString ?? "[]") }
+        set { hiddenForUserIDsString = ConversationEntity.encodeIDs(newValue) }
     }
 
     static func encodeIDs(_ ids: [String]) -> String {
@@ -203,6 +211,17 @@ final class MessageEntity {
             return []
         }
         return ids
+    }
+}
+
+@Model
+final class ConversationPreferenceEntity {
+    @Attribute(.unique) var conversationID: String
+    var isHidden: Bool
+
+    init(conversationID: String, isHidden: Bool = false) {
+        self.conversationID = conversationID
+        self.isHidden = isHidden
     }
 }
 

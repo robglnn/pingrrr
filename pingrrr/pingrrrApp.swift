@@ -17,7 +17,8 @@ struct PingrrrApp: App {
             let schema = Schema([
                 UserEntity.self,
                 ConversationEntity.self,
-                MessageEntity.self
+                MessageEntity.self,
+                ConversationPreferenceEntity.self
             ])
 
             let configuration = ModelConfiguration(
