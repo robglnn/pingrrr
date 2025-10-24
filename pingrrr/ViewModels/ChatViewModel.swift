@@ -15,6 +15,8 @@ final class ChatViewModel: ObservableObject {
     private let appServices: AppServices
     private let messageSyncService = MessageSyncService()
     private let typingIndicatorService = TypingIndicatorService()
+    private let typingTimeout: TimeInterval = 3
+    private var typingTimeoutWorkItem: DispatchWorkItem?
     private let modelContext: ModelContext
     private let conversationID: String
     private let currentUserID: String
@@ -59,7 +61,7 @@ final class ChatViewModel: ObservableObject {
             currentUserID: currentUserID
         ) { [weak self] usersTyping in
             guard let self else { return }
-            self.isTyping = !usersTyping.filter { $0 != self.currentUserID }.isEmpty
+            self.isTyping = !usersTyping.isEmpty
         }
 
         observePresence()
@@ -68,6 +70,8 @@ final class ChatViewModel: ObservableObject {
     func stop() {
         messageSyncService.stop()
         typingIndicatorService.stop()
+        typingTimeoutWorkItem?.cancel()
+        typingTimeoutWorkItem = nil
         removePresenceObservers()
     }
 
@@ -81,6 +85,10 @@ final class ChatViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
         let tempID = UUID().uuidString
         let now = Date()
+
+        typingIndicatorService.setTyping(false)
+        typingTimeoutWorkItem?.cancel()
+        typingTimeoutWorkItem = nil
 
         let optimisticMessage = MessageEntity(
             id: tempID,
@@ -197,10 +205,17 @@ final class ChatViewModel: ObservableObject {
 
     func userStartedTyping() {
         typingIndicatorService.setTyping(true)
+        typingTimeoutWorkItem?.cancel()
     }
 
     func userStoppedTyping() {
-        typingIndicatorService.setTyping(false)
+        typingTimeoutWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.typingIndicatorService.setTyping(false)
+        }
+        typingTimeoutWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + typingTimeout, execute: workItem)
     }
 
     func loadCachedMessages() {

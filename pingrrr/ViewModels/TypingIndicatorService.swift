@@ -8,8 +8,7 @@ final class TypingIndicatorService {
     private var currentUserID: String?
     private var listener: ListenerRegistration?
     private var onTypingChange: (([String]) -> Void)?
-    private var typingUsers: Set<String> = []
-    private var debounceTask: Task<Void, Never>?
+    private let typingVisibilityWindow: TimeInterval = 3
 
     func startMonitoring(
         conversationID: String,
@@ -28,27 +27,38 @@ final class TypingIndicatorService {
             .addSnapshotListener { [weak self] snapshot, _ in
                 guard let self else { return }
                 guard let data = snapshot?.data(),
-                      let typing = data["users"] as? [String] else {
+                      let users = data["users"] as? [String],
+                      let timestamp = (data["updatedAt"] as? Timestamp)?.dateValue(),
+                      Date().timeIntervalSince(timestamp) <= self.typingVisibilityWindow else {
                     self.updateTypingUsers([])
                     return
                 }
-                self.updateTypingUsers(typing)
+                let filtered = users.filter { $0 != currentUserID }
+                self.updateTypingUsers(filtered)
             }
     }
 
     func setTyping(_ isTyping: Bool) {
         guard let conversationID, let currentUserID else { return }
 
-        debounceTask?.cancel()
-        debounceTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            guard let self, !Task.isCancelled else { return }
+        let ref = db.collection("conversations")
+            .document(conversationID)
+            .collection("metadata")
+            .document("typing")
+
+        Task {
             do {
-                try await self.updateTypingStatus(
-                    conversationID: conversationID,
-                    userID: currentUserID,
-                    isTyping: isTyping
-                )
+                if isTyping {
+                    try await ref.setData([
+                        "users": FieldValue.arrayUnion([currentUserID]),
+                        "updatedAt": FieldValue.serverTimestamp()
+                    ], merge: true)
+                } else {
+                    try await ref.setData([
+                        "users": FieldValue.arrayRemove([currentUserID]),
+                        "updatedAt": FieldValue.serverTimestamp()
+                    ], merge: true)
+                }
             } catch {
                 print("[TypingIndicator] Failed to update typing state: \(error)")
             }
@@ -61,30 +71,11 @@ final class TypingIndicatorService {
         conversationID = nil
         currentUserID = nil
         onTypingChange = nil
-        typingUsers.removeAll()
-        debounceTask?.cancel()
-        debounceTask = nil
+        updateTypingUsers([])
     }
 
     private func updateTypingUsers(_ users: [String]) {
-        typingUsers = Set(users)
         onTypingChange?(users)
-    }
-
-    private func updateTypingStatus(conversationID: String, userID: String, isTyping: Bool) async throws {
-        let ref = db.collection("conversations")
-            .document(conversationID)
-            .collection("metadata")
-            .document("typing")
-
-        let update: [String: Any]
-        if isTyping {
-            update = ["users": FieldValue.arrayUnion([userID])]
-        } else {
-            update = ["users": FieldValue.arrayRemove([userID])]
-        }
-
-        try await ref.setData(update, merge: true)
     }
 }
 

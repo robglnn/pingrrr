@@ -34,7 +34,9 @@ struct ChatView: View {
         .toolbarBackground(Color.black, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task { viewModel.start() }
-        .onDisappear { viewModel.stop() }
+        .onDisappear {
+            viewModel.userStoppedTyping()
+        }
         .onChange(of: viewModel.draftMessage) { _, _ in
             if viewModel.draftMessage.isEmpty {
                 viewModel.userStoppedTyping()
