@@ -68,15 +68,17 @@ final class MessageSyncService {
     private func processChanges(_ changes: [DocumentChange]) async {
         guard let modelContext else { return }
 
+        var decodedRecords: [(MessageRecord, DocumentChangeType?)] = []
+
         for change in changes {
             guard let record = try? change.document.data(as: MessageRecord.self) else { continue }
-            switch change.type {
-            case .added, .modified:
-                upsert(record, changeType: change.type, isInitialLoad: false, in: modelContext)
-            case .removed:
-                remove(recordID: record.id, in: modelContext)
-            }
+            decodedRecords.append((record, change.type))
         }
+
+        for (record, changeType) in decodedRecords {
+            upsert(record, changeType: changeType, isInitialLoad: false, in: modelContext)
+        }
+
         try? modelContext.save()
         onChange?()
     }
@@ -120,7 +122,9 @@ final class MessageSyncService {
                 readBy: record.readBy ?? [],
                 isLocalOnly: false,
                 retryCount: 0,
-                nextRetryTimestamp: nil
+                nextRetryTimestamp: nil,
+                mediaURL: record.mediaURL,
+                mediaType: record.mediaType
             )
             context.insert(entity)
         }
@@ -138,6 +142,10 @@ final class MessageSyncService {
         }
 
         entity.translatedContent = record.translatedContent
+        entity.mediaURL = record.mediaURL
+        if let mediaType = record.mediaType {
+            entity.mediaType = mediaType
+        }
 
         if let timestamp = record.timestamp {
             entity.timestamp = timestamp
@@ -184,7 +192,9 @@ final class MessageSyncService {
 
         guard let conversation = try? context.fetch(descriptor).first else { return }
 
-        if let content = record.content {
+        if let mediaType = record.mediaType {
+            conversation.lastMessagePreview = mediaType.previewText
+        } else if let content = record.content {
             conversation.lastMessagePreview = content
         }
         if let timestamp = record.timestamp {
@@ -302,7 +312,6 @@ final class MessageSyncService {
         }
 
         try? context.save()
-    }
 }
 
 private struct MessageRecord: Codable {
@@ -315,6 +324,8 @@ private struct MessageRecord: Codable {
     var status: MessageStatus?
     var readBy: [String]?
     var unreadCounts: [String: Int]?
+    var mediaURL: String?
+    var mediaTypeRawValue: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -326,6 +337,8 @@ private struct MessageRecord: Codable {
         case status
         case readBy
         case unreadCounts
+        case mediaURL
+        case mediaType
     }
 
     init(
@@ -337,7 +350,9 @@ private struct MessageRecord: Codable {
         timestamp: Date? = nil,
         status: MessageStatus? = nil,
         readBy: [String]? = nil,
-        unreadCounts: [String: Int]? = nil
+        unreadCounts: [String: Int]? = nil,
+        mediaURL: String? = nil,
+        mediaType: MessageMediaType? = nil
     ) {
         self.id = id
         self.conversationID = conversationID
@@ -348,5 +363,14 @@ private struct MessageRecord: Codable {
         self.status = status
         self.readBy = readBy
         self.unreadCounts = unreadCounts
+        self.mediaURL = mediaURL
+        self.mediaTypeRawValue = mediaType?.rawValue
+    }
+
+    var mediaType: MessageMediaType? {
+        get {
+            guard let mediaTypeRawValue else { return nil }
+            return MessageMediaType(rawValue: mediaTypeRawValue)
+        }
     }
 }

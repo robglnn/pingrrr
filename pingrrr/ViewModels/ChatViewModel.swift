@@ -91,61 +91,38 @@ final class ChatViewModel: ObservableObject {
     func sendMessage() async {
         let trimmed = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let tempID = UUID().uuidString
-        let now = Date()
 
-        typingIndicatorService.setTyping(false)
-        typingTimeoutWorkItem?.cancel()
-        typingTimeoutWorkItem = nil
-
-        let optimisticMessage = MessageEntity(
-            id: tempID,
-            conversationID: conversationID,
-            senderID: currentUserID,
-            content: trimmed,
-            timestamp: now,
-            status: .sending,
-            readBy: [currentUserID],
-            isLocalOnly: true,
-            retryCount: 0,
-            nextRetryTimestamp: nil
-        )
-
-        modelContext.insert(optimisticMessage)
-        messages.append(optimisticMessage)
-        regroupMessages()
-        updateReadReceiptProfiles()
+        let request = MessageRequest.text(trimmed)
+        await send(request: request)
         draftMessage = ""
+    }
 
-        updateConversationForOutgoingMessage(content: trimmed, timestamp: now, messageID: tempID)
+    func sendImage(data: Data) async {
+        let request = MessageRequest.media(data: data, mediaType: .image)
+        await send(request: request)
+    }
 
-        let messageData: [String: Any] = [
-            "id": tempID,
-            "conversationID": conversationID,
-            "senderID": currentUserID,
-            "content": trimmed,
-            "timestamp": now,
-            "status": MessageStatus.sent.rawValue,
-            "readBy": [currentUserID]
-        ]
+    func sendVoice(data: Data) async {
+        let request = MessageRequest.media(data: data, mediaType: .voice)
+        await send(request: request)
+    }
 
-        let docRef = Firestore.firestore()
-            .collection("conversations")
-            .document(conversationID)
-            .collection("messages")
-            .document(tempID)
+    enum MessageRequest {
+        case text(String)
+        case media(data: Data, mediaType: MessageMediaType)
 
-        do {
-            try await docRef.setData(messageData)
-            optimisticMessage.status = .sent
-            optimisticMessage.isLocalOnly = false
-            optimisticMessage.retryCount = 0
-            optimisticMessage.nextRetryTimestamp = nil
-            try modelContext.save()
-        } catch {
-            errorMessage = error.localizedDescription
-            outgoingQueue.enqueueRetry(for: optimisticMessage)
+        var previewText: String {
+            switch self {
+            case let .text(text):
+                return text
+            case let .media(_, mediaType):
+                return mediaType.previewText
+            }
         }
+    }
+
+    private func uploadMedia(data: Data, mediaType: MessageMediaType, conversationID: String) async throws -> String {
+        return try await appServices.mediaService.upload(media: data, type: mediaType, conversationID: conversationID)
     }
 
     func retrySendingMessage(_ message: MessageEntity) async {
@@ -155,24 +132,16 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func resend(_ message: MessageEntity) async {
+        guard let payload = createPayload(for: message) else { return }
+
         let docRef = Firestore.firestore()
             .collection("conversations")
             .document(conversationID)
             .collection("messages")
             .document(message.id)
 
-        let data: [String: Any] = [
-            "id": message.id,
-            "conversationID": conversationID,
-            "senderID": currentUserID,
-            "content": message.content,
-            "timestamp": message.timestamp,
-            "status": MessageStatus.sent.rawValue,
-            "readBy": message.readBy
-        ]
-
         do {
-            try await docRef.setData(data)
+            try await docRef.setData(payload)
             message.status = .sent
             message.isLocalOnly = false
             message.retryCount = 0
@@ -181,6 +150,105 @@ final class ChatViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             outgoingQueue.enqueueRetry(for: message)
+        }
+    }
+
+    private func send(request: MessageRequest) async {
+        guard let conversation else { return }
+
+        let tempID = UUID().uuidString
+        let now = Date()
+
+        typingIndicatorService.setTyping(false)
+        typingTimeoutWorkItem?.cancel()
+        typingTimeoutWorkItem = nil
+
+        var optimisticContent = request.previewText
+        var optimisticMediaURL: String? = nil
+        var optimisticMediaType: MessageMediaType? = nil
+
+        if case let .media(data, mediaType) = request {
+            do {
+                let uploadedURL = try await uploadMedia(data: data, mediaType: mediaType, conversationID: conversation.id)
+                optimisticMediaURL = uploadedURL
+                optimisticMediaType = mediaType
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
+
+        let optimisticMessage = MessageEntity(
+            id: tempID,
+            conversationID: conversationID,
+            senderID: currentUserID,
+            content: optimisticContent,
+            translatedContent: nil,
+            timestamp: now,
+            status: .sending,
+            readBy: [currentUserID],
+            isLocalOnly: true,
+            retryCount: 0,
+            nextRetryTimestamp: nil,
+            mediaURL: optimisticMediaURL,
+            mediaType: optimisticMediaType
+        )
+
+        modelContext.insert(optimisticMessage)
+        messages.append(optimisticMessage)
+        regroupMessages()
+        updateReadReceiptProfiles()
+
+        updateConversationForOutgoingMessage(content: optimisticContent, timestamp: now, messageID: tempID)
+
+        sendToFirestore(optimisticMessage)
+    }
+
+    private func createPayload(for message: MessageEntity) -> [String: Any]? {
+        var payload: [String: Any] = [
+            "id": message.id,
+            "conversationID": message.conversationID,
+            "senderID": message.senderID,
+            "content": message.content,
+            "timestamp": message.timestamp,
+            "status": MessageStatus.sent.rawValue,
+            "readBy": message.readBy
+        ]
+
+        if let mediaURL = message.mediaURL {
+            payload["mediaURL"] = mediaURL
+            payload["mediaType"] = message.mediaType?.rawValue
+        }
+
+        return payload
+    }
+
+    private func sendToFirestore(_ message: MessageEntity) {
+        guard let payload = createPayload(for: message) else {
+            errorMessage = "Unable to create message payload"
+            return
+        }
+
+        let docRef = Firestore.firestore()
+            .collection("conversations")
+            .document(conversationID)
+            .collection("messages")
+            .document(message.id)
+
+        Task {
+            do {
+                try await docRef.setData(payload)
+                message.status = .sent
+                message.isLocalOnly = false
+                message.retryCount = 0
+                message.nextRetryTimestamp = nil
+                try modelContext.save()
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.outgoingQueue.enqueueRetry(for: message)
+                }
+            }
         }
     }
 

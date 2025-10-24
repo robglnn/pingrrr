@@ -10,6 +10,9 @@ struct ChatView: View {
     private let conversation: ConversationEntity
     private let currentUserID: String
 
+    @State private var showMediaSheet = false
+    @State private var showMediaSheet = false
+
     init(conversation: ConversationEntity, currentUserID: String, modelContext: ModelContext, appServices: AppServices) {
         self.conversation = conversation
         self.currentUserID = currentUserID
@@ -182,11 +185,23 @@ struct ChatView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    // TODO: Attachment support
+                    showMediaSheet = true
                 } label: {
                     Image(systemName: "plus.circle")
                         .imageScale(.large)
                         .foregroundStyle(.secondary)
+                }
+                .sheet(isPresented: $showMediaSheet) {
+                    MediaPickerSheet { result in
+                        switch result {
+                        case let .image(data):
+                            Task { await viewModel.sendImage(data: data) }
+                        case let .voice(data):
+                            Task { await viewModel.sendVoice(data: data) }
+                        case .cancel:
+                            break
+                        }
+                    }
                 }
 
                 TextField("Message", text: $viewModel.draftMessage, axis: .vertical)

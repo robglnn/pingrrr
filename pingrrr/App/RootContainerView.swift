@@ -43,6 +43,7 @@ final class AppServices: ObservableObject {
     lazy var outgoingMessageQueue = OutgoingMessageQueue(networkMonitor: networkMonitor)
     let conversationService = ConversationService()
     let conversationNavigation = PassthroughSubject<String, Never>()
+    let mediaService = MediaService()
 
     private var modelContext: ModelContext?
     private var hasConfigured = false

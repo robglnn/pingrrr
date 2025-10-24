@@ -166,7 +166,7 @@ final class OutgoingMessageQueue {
     }
 
     private func createPayload(for message: MessageEntity) -> [String: Any] {
-        [
+        var payload: [String: Any] = [
             "id": message.id,
             "conversationID": message.conversationID,
             "senderID": message.senderID,
@@ -176,6 +176,13 @@ final class OutgoingMessageQueue {
             "status": MessageStatus.sent.rawValue,
             "readBy": message.readBy
         ]
+
+        if let mediaURL = message.mediaURL {
+            payload["mediaURL"] = mediaURL
+            payload["mediaType"] = message.mediaType?.rawValue
+        }
+
+        return payload
     }
 
     private func flushQueue() async {

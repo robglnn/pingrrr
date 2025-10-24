@@ -142,6 +142,34 @@ enum MessageStatus: String, Codable, CaseIterable, Sendable {
     case failed
 }
 
+enum MessageMediaType: String, Codable, CaseIterable, Sendable {
+    case image
+    case voice
+}
+
+extension MessageMediaType {
+    var fileExtension: String {
+        switch self {
+        case .image: return "jpg"
+        case .voice: return "m4a"
+        }
+    }
+
+    var mimeType: String {
+        switch self {
+        case .image: return "image/jpeg"
+        case .voice: return "audio/m4a"
+        }
+    }
+
+    var previewText: String {
+        switch self {
+        case .image: return "Sent a photo"
+        case .voice: return "Sent a voice message"
+        }
+    }
+}
+
 // Temporarily simplifying MessageEntity for build compatibility
 @Model
 final class MessageEntity {
@@ -156,6 +184,8 @@ final class MessageEntity {
     var isLocalOnly: Bool
     var retryCount: Int
     var nextRetryTimestamp: Date?
+    var mediaURL: String?
+    var mediaTypeRawValue: String?
 
     // Temporarily removing relationship for build compatibility
     // @Relationship(deleteRule: .nullify, inverse: \ConversationEntity.messages)
@@ -172,7 +202,9 @@ final class MessageEntity {
         readBy: [String] = [],
         isLocalOnly: Bool = false,
         retryCount: Int = 0,
-        nextRetryTimestamp: Date? = nil
+        nextRetryTimestamp: Date? = nil,
+        mediaURL: String? = nil,
+        mediaType: MessageMediaType? = nil
     ) {
         self.id = id
         self.conversationID = conversationID
@@ -185,6 +217,8 @@ final class MessageEntity {
         self.isLocalOnly = isLocalOnly
         self.retryCount = retryCount
         self.nextRetryTimestamp = nextRetryTimestamp
+        self.mediaURL = mediaURL
+        self.mediaTypeRawValue = mediaType?.rawValue
     }
 
     var status: MessageStatus {
@@ -195,6 +229,16 @@ final class MessageEntity {
     var readBy: [String] {
         get { MessageEntity.decodeIDs(readByString) }
         set { readByString = MessageEntity.encodeIDs(newValue) }
+    }
+
+    var mediaType: MessageMediaType? {
+        get {
+            guard let mediaTypeRawValue else { return nil }
+            return MessageMediaType(rawValue: mediaTypeRawValue)
+        }
+        set {
+            mediaTypeRawValue = newValue?.rawValue
+        }
     }
 
     static func encodeIDs(_ ids: [String]) -> String {
