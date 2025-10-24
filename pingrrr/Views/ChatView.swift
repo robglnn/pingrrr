@@ -109,13 +109,12 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(viewModel.messages) { message in
-                        MessageBubbleView(
-                            message: message,
-                            isOwnMessage: message.senderID == currentUserID,
-                            onRetry: { Task { await viewModel.retrySendingMessage(message) } }
+                    ForEach(viewModel.displayItems) { item in
+                        MessageRowView(
+                            item: item,
+                            onRetry: { Task { await viewModel.retrySendingMessage(item.message) } }
                         )
-                        .id(message.id)
+                        .id(item.id)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -125,10 +124,10 @@ struct ChatView: View {
             .onAppear {
                 scrollToBottom(proxy: proxy, animated: false, delayed: true)
             }
-            .onChange(of: viewModel.messages.count) { _, _ in
+            .onChange(of: viewModel.displayItems.count) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true, delayed: false)
             }
-            .onChange(of: viewModel.messages.last?.id) { _, _ in
+            .onChange(of: viewModel.displayItems.last?.id) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true, delayed: false)
                 Task { await viewModel.markMessagesAsRead() }
             }
@@ -136,7 +135,7 @@ struct ChatView: View {
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool, delayed: Bool) {
-        guard let lastID = viewModel.messages.last?.id else { return }
+        guard let lastID = viewModel.displayItems.last?.id else { return }
 
         let executeScroll = {
             if animated {
@@ -216,17 +215,30 @@ struct ChatView: View {
     }
 }
 
-private struct MessageBubbleView: View {
-    let message: MessageEntity
-    let isOwnMessage: Bool
+private struct MessageRowView: View {
+    let item: ChatViewModel.MessageDisplayItem
     let onRetry: () -> Void
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            if isOwnMessage { Spacer(minLength: 60) }
+            if item.isCurrentUser {
+                Spacer(minLength: 40)
+            } else {
+                if item.showAvatar {
+                    avatarView
+                } else {
+                    Spacer().frame(width: 40)
+                }
+            }
 
-            VStack(alignment: isOwnMessage ? .trailing : .leading, spacing: 6) {
-                Text(message.content)
+            VStack(alignment: item.isCurrentUser ? .trailing : .leading, spacing: 6) {
+                if item.showSenderName {
+                    Text(senderName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(item.message.content)
                     .font(.body)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
@@ -235,23 +247,25 @@ private struct MessageBubbleView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                 HStack(spacing: 6) {
-                    Text(message.timestamp, style: .time)
+                    Text(item.message.timestamp, style: .time)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
-                    if isOwnMessage {
+                    if item.isCurrentUser {
                         statusIcon
                     }
                 }
             }
-            .frame(maxWidth: UIScreen.main.bounds.width * 0.72, alignment: isOwnMessage ? .trailing : .leading)
+            .frame(maxWidth: UIScreen.main.bounds.width * 0.72, alignment: item.isCurrentUser ? .trailing : .leading)
 
-            if !isOwnMessage { Spacer(minLength: 60) }
+            if !item.isCurrentUser {
+                Spacer(minLength: 40)
+            }
         }
     }
 
     private var bubbleBackground: some ShapeStyle {
-        if isOwnMessage {
+        if item.isCurrentUser {
             return AnyShapeStyle(Color.blue.opacity(0.9))
         } else {
             return AnyShapeStyle(Color.white.opacity(0.08))
@@ -260,7 +274,7 @@ private struct MessageBubbleView: View {
 
     @ViewBuilder
     private var statusIcon: some View {
-        switch message.status {
+        switch item.message.status {
         case .sending:
             Image(systemName: "clock")
                 .font(.caption2)
@@ -284,6 +298,52 @@ private struct MessageBubbleView: View {
                     .foregroundStyle(.red)
             }
         }
+    }
+
+    @ViewBuilder
+    private var avatarView: some View {
+        if let urlString = item.senderProfile?.profilePictureURL,
+           let url = URL(string: urlString) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case let .success(image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .empty:
+                    ProgressView()
+                case .failure:
+                    placeholder
+                @unknown default:
+                    placeholder
+                }
+            }
+            .frame(width: 36, height: 36)
+            .clipShape(Circle())
+        } else {
+            placeholder
+                .frame(width: 36, height: 36)
+        }
+    }
+
+    private var placeholder: some View {
+        Circle()
+            .fill(Color.blue.opacity(0.2))
+            .overlay(
+                Text(senderInitial)
+                    .font(.caption.bold())
+                    .foregroundColor(.blue)
+            )
+    }
+
+    private var senderName: String {
+        item.senderProfile?.displayName ?? item.message.senderID
+    }
+
+    private var senderInitial: String {
+        senderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "?"
+            : String(senderName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased()
     }
 }
 

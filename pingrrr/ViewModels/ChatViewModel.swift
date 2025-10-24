@@ -6,6 +6,7 @@ import FirebaseFirestore
 @MainActor
 final class ChatViewModel: ObservableObject {
     @Published private(set) var messages: [MessageEntity] = []
+    @Published private(set) var displayItems: [MessageDisplayItem] = []
     @Published private(set) var isSending = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var isTyping = false
@@ -16,11 +17,15 @@ final class ChatViewModel: ObservableObject {
     private let messageSyncService = MessageSyncService()
     private let typingIndicatorService = TypingIndicatorService()
     private let typingTimeout: TimeInterval = 3
+    private let groupingWindow: TimeInterval = 180
     private var typingTimeoutWorkItem: DispatchWorkItem?
     private let modelContext: ModelContext
     private let conversationID: String
     private let currentUserID: String
     private var conversation: ConversationEntity?
+    private let profileService = ProfileService()
+    private var userProfiles: [String: UserProfile] = [:]
+    private var attemptedProfileFetches: Set<String> = []
     private var outgoingQueue: OutgoingMessageQueue {
         appServices.outgoingMessageQueue
     }
@@ -107,6 +112,7 @@ final class ChatViewModel: ObservableObject {
 
         modelContext.insert(optimisticMessage)
         messages.append(optimisticMessage)
+        regroupMessages()
         draftMessage = ""
 
         updateConversationForOutgoingMessage(content: trimmed, timestamp: now, messageID: tempID)
@@ -232,6 +238,7 @@ final class ChatViewModel: ObservableObject {
             sortBy: [SortDescriptor(\.timestamp, order: .forward)]
         )
         messages = (try? modelContext.fetch(descriptor)) ?? []
+        regroupMessages()
         refreshConversationReference()
     }
 
@@ -313,6 +320,111 @@ final class ChatViewModel: ObservableObject {
         conversation.participantIDs
             .filter { $0 != currentUserID }
             .forEach { presenceService.removeObserver(for: $0) }
+    }
+
+    private func regroupMessages() {
+        guard !messages.isEmpty else {
+            displayItems = []
+            return
+        }
+
+        let sorted = messages.sorted { $0.timestamp < $1.timestamp }
+
+        var newItems: [MessageDisplayItem] = []
+        var currentGroup: [MessageEntity] = []
+        var missingProfiles: Set<String> = []
+
+        func flushCurrentGroup() {
+            guard !currentGroup.isEmpty else { return }
+            let qualifiesForChain = currentGroup.count >= 3
+
+            for (index, message) in currentGroup.enumerated() {
+                let isCurrentUser = message.senderID == currentUserID
+                var showName = false
+                var showAvatar = false
+
+                if !isCurrentUser {
+                    if qualifiesForChain {
+                        showName = index == 0
+                        showAvatar = index == 0
+                    } else {
+                        showName = true
+                        showAvatar = true
+                    }
+
+                    if userProfiles[message.senderID] == nil {
+                        missingProfiles.insert(message.senderID)
+                    }
+                }
+
+                newItems.append(
+                    MessageDisplayItem(
+                        id: message.id,
+                        message: message,
+                        showSenderName: showName,
+                        showAvatar: showAvatar,
+                        senderProfile: userProfiles[message.senderID],
+                        isCurrentUser: isCurrentUser
+                    )
+                )
+            }
+
+            currentGroup.removeAll(keepingCapacity: true)
+        }
+
+        for message in sorted {
+            if let last = currentGroup.last,
+               last.senderID == message.senderID,
+               message.timestamp.timeIntervalSince(last.timestamp) <= groupingWindow {
+                currentGroup.append(message)
+            } else {
+                flushCurrentGroup()
+                currentGroup = [message]
+            }
+        }
+
+        flushCurrentGroup()
+
+        displayItems = newItems
+
+        if !missingProfiles.isEmpty {
+            loadProfilesIfNeeded(for: missingProfiles)
+        }
+    }
+
+    private func loadProfilesIfNeeded(for userIDs: Set<String>) {
+        let toFetch = userIDs.subtracting(attemptedProfileFetches)
+        guard !toFetch.isEmpty else { return }
+
+        attemptedProfileFetches.formUnion(toFetch)
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            for id in toFetch {
+                do {
+                    let profile = try await profileService.fetchUserProfile(userID: id)
+                    userProfiles[id] = profile
+                } catch {
+                    print("[ChatViewModel] Failed to load profile for \(id): \(error)")
+                }
+            }
+
+            regroupMessages()
+        }
+    }
+
+    func cachedProfile(for userID: String) -> UserProfile? {
+        userProfiles[userID]
+    }
+
+    struct MessageDisplayItem: Identifiable {
+        let id: String
+        let message: MessageEntity
+        let showSenderName: Bool
+        let showAvatar: Bool
+        let senderProfile: UserProfile?
+        let isCurrentUser: Bool
     }
 }
 
