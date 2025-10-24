@@ -139,6 +139,12 @@ final class ConversationsViewModel: ObservableObject {
         }
     }
 
+    func removeConversation(withID id: String) {
+        if let index = items.firstIndex(where: { $0.id == id }) {
+            items.remove(at: index)
+        }
+    }
+
     private func refreshLocalItems() {
         let descriptor = FetchDescriptor<ConversationEntity>(
             sortBy: [SortDescriptor(\.lastMessageTimestamp, order: .reverse)]

@@ -6,6 +6,8 @@ struct SettingsSheet: View {
 
     @State private var isSigningOut = false
     @State private var errorMessage: String?
+    @State private var showingProfileEdit = false
+    @StateObject private var profileService = ProfileService()
 
     init(appServices: AppServices, onDismiss: @escaping () -> Void) {
         _appServices = ObservedObject(initialValue: appServices)
@@ -15,22 +17,38 @@ struct SettingsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Account") {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(appServices.authService.currentUserDisplayName ?? "Unknown user")
-                                .font(.headline)
-                            if let email = appServices.authService.currentUserEmail {
-                                Text(email)
+                Section("Profile") {
+                    Button {
+                        showingProfileEdit = true
+                    } label: {
+                        HStack {
+                            ProfileAvatarView(profile: profileService.currentUserProfile)
+                                .frame(width: 44, height: 44)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(profileService.currentUserProfile?.displayName ?? appServices.authService.currentUserDisplayName ?? "Unknown user")
+                                    .font(.headline)
+                                Text(appServices.authService.currentUserEmail ?? "")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote)
+                                .foregroundStyle(.tertiary)
                         }
-                        Spacer()
-                        if let userID = appServices.authService.currentUserID {
+                    }
+                }
+
+                Section("Account") {
+                    if let userID = appServices.authService.currentUserID {
+                        HStack {
+                            Text("User ID")
+                                .foregroundStyle(.secondary)
+                            Spacer()
                             Text(userID)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
                         }
                     }
 
@@ -58,6 +76,12 @@ struct SettingsSheet: View {
                     Button("Done") { onDismiss() }
                 }
             }
+            .task {
+                await profileService.loadCurrentUserProfile()
+            }
+        }
+        .sheet(isPresented: $showingProfileEdit) {
+            ProfileEditView(profileService: profileService)
         }
     }
 
@@ -82,6 +106,45 @@ struct SettingsSheet: View {
                 isSigningOut = false
             }
         }
+    }
+}
+
+struct ProfileAvatarView: View {
+    let profile: UserProfile?
+
+    var body: some View {
+        Group {
+            if let urlString = profile?.profilePictureURL,
+               let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .empty:
+                        ProgressView()
+                    case .failure:
+                        placeholder
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .clipShape(Circle())
+    }
+
+    private var placeholder: some View {
+        Circle()
+            .fill(Color.blue.opacity(0.15))
+            .overlay(
+                Text((profile?.displayName ?? "?").prefix(1).uppercased())
+                    .font(.headline.bold())
+                    .foregroundColor(.blue)
+            )
     }
 }
 

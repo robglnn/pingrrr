@@ -39,6 +39,13 @@ struct ConversationsView: View {
                                     )
                                 }
                                 .listRowBackground(Color.clear)
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        Task { await deleteConversation(conversation) }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                         .listStyle(.plain)
@@ -307,6 +314,31 @@ private extension ConversationsView {
         activeNotification = nil
         if !navigationPath.contains(conversation) {
             navigationPath.append(conversation)
+        }
+    }
+
+    private func deleteConversation(_ conversation: ConversationEntity) async {
+        let alertTitle = "Delete chat"
+        let alertMessage = "This removes the chat from this device only."
+
+        await MainActor.run {
+            let alert = UIAlertController(title: alertTitle, message: alertMessage, preferredStyle: .actionSheet)
+            alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { _ in
+                Task { await deleteConversationLocally(conversation) }
+            })
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            UIApplication.present(alert: alert)
+        }
+    }
+
+    @MainActor
+    private func deleteConversationLocally(_ conversation: ConversationEntity) async {
+        modelContext.delete(conversation)
+        do {
+            try modelContext.save()
+            viewModel.removeConversation(withID: conversation.id)
+        } catch {
+            print("[ConversationsView] Failed to delete conversation locally: \(error)")
         }
     }
 }

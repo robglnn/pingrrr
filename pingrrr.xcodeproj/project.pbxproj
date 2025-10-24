@@ -24,6 +24,7 @@
 		E16CBCDE2EA9C3B10020787F /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = E16CBCDD2EA9C3B10020787F /* FirebaseFunctions */; };
 		E16CBCE02EA9C3B10020787F /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = E16CBCDF2EA9C3B10020787F /* FirebaseMessaging */; };
 		E16CBCE22EA9C3B10020787F /* FirebasePerformance in Frameworks */ = {isa = PBXBuildFile; productRef = E16CBCE12EA9C3B10020787F /* FirebasePerformance */; };
+		E1E36C632EABE7BA004E9376 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = E1E36C622EABE7BA004E9376 /* FirebaseStorage */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -96,6 +97,7 @@
 				E16CBCD82EA9C3B10020787F /* FirebaseAuth in Frameworks */,
 				E16CBCE22EA9C3B10020787F /* FirebasePerformance in Frameworks */,
 				E1491A072EA7F9050071FE6E /* FirebaseAuth in Frameworks */,
+				E1E36C632EABE7BA004E9376 /* FirebaseStorage in Frameworks */,
 				E16CBCDA2EA9C3B10020787F /* FirebaseCrashlytics in Frameworks */,
 				E1491A0D2EA7F9050071FE6E /* FirebaseFunctions in Frameworks */,
 				E1491A0B2EA7F9050071FE6E /* FirebaseFirestore in Frameworks */,
@@ -745,6 +747,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E1491A032EA7F9050071FE6E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebasePerformance;
+		};
+		E1E36C622EABE7BA004E9376 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E1491A032EA7F9050071FE6E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
