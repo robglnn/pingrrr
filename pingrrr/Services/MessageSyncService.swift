@@ -194,8 +194,33 @@ final class MessageSyncService {
         guard !isInitialLoad else { return }
 
         if changeType == .added,
+           let currentUserID,
+           let senderID = record.senderID,
+           senderID != currentUserID,
+           let preview = record.content,
+           !preview.isEmpty,
+           let conversation = try? context.fetch(
+               FetchDescriptor<ConversationEntity>(predicate: #Predicate { $0.id == conversationID })
+           ).first {
+            Task {
+                let senderName = await resolveDisplayName(for: senderID, in: context) ?? "New message"
+                await MainActor.run {
+                    NotificationService.shared.showForegroundNotification(
+                        message: preview,
+                        conversationID: conversationID,
+                        conversationTitle: conversation.title,
+                        senderName: senderName
+                    )
+                }
+            }
+        }
+
+        if changeType == .added,
            let currentUserID = currentUserID,
-           let unreadCounts = record.unreadCounts {
+           let unreadCounts = record.unreadCounts,
+           let conversation = try? context.fetch(
+               FetchDescriptor<ConversationEntity>(predicate: #Predicate { $0.id == conversationID })
+           ).first {
             conversation.unreadCount = unreadCounts[currentUserID] ?? conversation.unreadCount
         }
     }
@@ -227,6 +252,56 @@ final class MessageSyncService {
         } else if entity.status == .sending {
             entity.status = .sent
         }
+    }
+
+    private func senderDisplayName(for userID: String) -> String? {
+        guard let modelContext else { return nil }
+        let descriptor = FetchDescriptor<UserEntity>(
+            predicate: #Predicate { $0.id == userID }
+        )
+        return try? modelContext.fetch(descriptor).first?.displayName
+    }
+
+    private func resolveDisplayName(for userID: String, in context: ModelContext) async -> String? {
+        if let cached = senderDisplayName(for: userID) {
+            return cached
+        }
+
+        do {
+            let snapshot = try await db.collection("users").document(userID).getDocument()
+            guard let data = snapshot.data() else {
+                print("[MessageSync] No profile data for user \(userID)")
+                return nil
+            }
+            let displayName = data["displayName"] as? String
+            if let displayName {
+                cacheUser(userID: userID, displayName: displayName, email: (data["email"] as? String) ?? "", in: context)
+            }
+            return displayName
+        } catch {
+            print("[MessageSync] Failed to fetch sender display name: \(error)")
+            return nil
+        }
+    }
+
+    private func cacheUser(userID: String, displayName: String, email: String, in context: ModelContext) {
+        let descriptor = FetchDescriptor<UserEntity>(
+            predicate: #Predicate { $0.id == userID }
+        )
+
+        if let existing = try? context.fetch(descriptor).first {
+            existing.displayName = displayName
+            existing.email = email
+        } else {
+            let user = UserEntity(
+                id: userID,
+                displayName: displayName,
+                email: email
+            )
+            context.insert(user)
+        }
+
+        try? context.save()
     }
 }
 

@@ -35,11 +35,12 @@ final class NotificationService: NSObject, ObservableObject {
         let timestamp: Date
 
         var displayTitle: String {
-            conversationTitle ?? "Chat"
+            let chatName = conversationTitle?.isEmpty == false ? conversationTitle! : "Chat"
+            return "Pingrrr · New message in \(chatName)"
         }
 
         var displayMessage: String {
-            message.isEmpty ? senderName : "\(senderName): \(message)"
+            message
         }
     }
 
@@ -108,30 +109,23 @@ final class NotificationService: NSObject, ObservableObject {
         senderName: String
     ) {
         guard UIApplication.shared.applicationState == .active else { return }
-        guard !isInDoNotDisturb() else {
-            print("[NotificationService] Suppressing toast (Do Not Disturb)")
-            return
-        }
 
         if isInConversation(conversationID) {
-            markChatAsRecentlyActive(conversationID)
+            print("[NotificationService] Suppressing toast (currently viewing conversation)")
             return
         }
 
-        if isRecentlyActive(conversationID) {
-            return
-        }
+        let effectiveMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = effectiveMessage.isEmpty ? senderName : effectiveMessage
 
-        if currentToast != nil {
-            return
-        }
+        print("[NotificationService] Showing toast for conversationID=\(conversationID) sender=\(senderName) message=\(body)")
 
         let toast = ToastNotification(
             id: UUID().uuidString,
             conversationID: conversationID,
             conversationTitle: conversationTitle,
             senderName: senderName,
-            message: message,
+            message: body,
             timestamp: Date()
         )
 
@@ -147,15 +141,14 @@ final class NotificationService: NSObject, ObservableObject {
     }
 
     func setCurrentChatID(_ chatID: String) {
+        print("[NotificationService] setCurrentChatID=\(chatID)")
         currentChatID = chatID
         markChatAsRecentlyActive(chatID)
         hideCurrentToast()
     }
 
     func clearCurrentChatID() {
-        if let chatID = currentChatID {
-            markChatAsRecentlyActive(chatID)
-        }
+        print("[NotificationService] clearCurrentChatID from=\(currentChatID ?? "nil")")
         currentChatID = nil
     }
 
@@ -229,7 +222,7 @@ final class NotificationService: NSObject, ObservableObject {
         currentChatID == conversationID
     }
 
-    private func isRecentlyActive(_ chatID: String, within seconds: TimeInterval = 5) -> Bool {
+    private func isRecentlyActive(_ chatID: String, within seconds: TimeInterval = 1) -> Bool {
         guard let last = recentChatActivity[chatID] else { return false }
         return Date().timeIntervalSince(last) < seconds
     }

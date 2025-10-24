@@ -2,6 +2,19 @@ import Foundation
 import SwiftData
 import FirebaseFirestore
 
+private final class MessageListenerState {
+    var lastMessageID: String?
+    var conversationTitle: String?
+    var hasPrimed: Bool
+    var registration: ListenerRegistration?
+
+    init(lastMessageID: String?, conversationTitle: String?) {
+        self.lastMessageID = lastMessageID
+        self.conversationTitle = conversationTitle
+        self.hasPrimed = false
+    }
+}
+
 @MainActor
 final class ConversationsSyncService {
     private let db = Firestore.firestore()
@@ -9,12 +22,15 @@ final class ConversationsSyncService {
     private var currentUserID: String?
     private weak var modelContext: ModelContext?
     private var onChange: (() -> Void)?
+    private var hasProcessedInitialSnapshot = false
+    private var messageListeners: [String: MessageListenerState] = [:]
 
     func start(for userID: String, modelContext: ModelContext, onChange: @escaping () -> Void) {
         stop()
         currentUserID = userID
         self.modelContext = modelContext
         self.onChange = onChange
+        hasProcessedInitialSnapshot = false
 
         print("[ConversationsSync] Starting listener for user: \(userID)")
         listener = db.collection("conversations")
@@ -31,7 +47,9 @@ final class ConversationsSyncService {
 
                 Task { @MainActor in
                     do {
-                        try await self.processSnapshotChanges(snapshot.documentChanges)
+                        let isInitial = !self.hasProcessedInitialSnapshot
+                        try await self.processSnapshotChanges(snapshot.documentChanges, isInitial: isInitial)
+                        self.hasProcessedInitialSnapshot = true
                     } catch {
                         print("[ConversationsSync] Failed to process changes: \(error)")
                     }
@@ -58,9 +76,14 @@ final class ConversationsSyncService {
         currentUserID = nil
         modelContext = nil
         onChange = nil
+        hasProcessedInitialSnapshot = false
+        for (_, state) in messageListeners {
+            state.registration?.remove()
+        }
+        messageListeners.removeAll()
     }
 
-    private func processSnapshotChanges(_ changes: [DocumentChange]) async throws {
+    private func processSnapshotChanges(_ changes: [DocumentChange], isInitial: Bool) async throws {
         guard let modelContext, let currentUserID else { return }
 
         let existing = try modelContext.fetch(FetchDescriptor<ConversationEntity>())
@@ -94,12 +117,15 @@ final class ConversationsSyncService {
                 entity.lastMessagePreview = record.lastMessagePreview
                 entity.lastMessageTimestamp = record.bestTimestamp ?? entity.lastMessageTimestamp ?? Date()
                 entity.unreadCount = record.unreadCounts?[currentUserID] ?? 0
+
+                ensureMessageListener(for: identifier, title: entity.title, lastMessageID: entity.lastMessageID)
             case .removed:
                 let identifier = change.document.documentID
                 if let entity = existingMap[identifier] {
                     modelContext.delete(entity)
                     existingMap.removeValue(forKey: identifier)
                 }
+                removeMessageListener(for: identifier)
             }
         }
 
@@ -142,14 +168,155 @@ final class ConversationsSyncService {
             entity.lastMessagePreview = record.lastMessagePreview
             entity.lastMessageTimestamp = record.bestTimestamp ?? entity.lastMessageTimestamp ?? Date()
             entity.unreadCount = record.unreadCounts?[currentUserID] ?? 0
+
+            ensureMessageListener(for: identifier, title: entity.title, lastMessageID: entity.lastMessageID)
         }
 
         for (identifier, entity) in existingMap where !seenIdentifiers.contains(identifier) {
             modelContext.delete(entity)
+            removeMessageListener(for: identifier)
         }
 
         try modelContext.save()
         onChange?()
+    }
+
+    private func ensureMessageListener(for conversationID: String, title: String?, lastMessageID: String?) {
+        if let state = messageListeners[conversationID] {
+            if let title { state.conversationTitle = title }
+            if let lastMessageID { state.lastMessageID = lastMessageID }
+            return
+        }
+
+        guard let currentUserID else { return }
+
+        let state = MessageListenerState(lastMessageID: lastMessageID, conversationTitle: title)
+        messageListeners[conversationID] = state
+
+        let baseQuery = db.collection("conversations")
+            .document(conversationID)
+            .collection("messages")
+
+        let registration: ListenerRegistration
+        registration = baseQuery
+            .order(by: "timestamp", descending: false)
+            .limit(toLast: 50)
+            .addSnapshotListener { [weak self] snapshot, error in
+                guard let self else { return }
+                guard let state = self.messageListeners[conversationID] else { return }
+
+                if let error {
+                    print("[ConversationsSync] Message listener error for \(conversationID): \(error)")
+                    return
+                }
+
+                guard let snapshot else { return }
+
+                if !state.hasPrimed {
+                    state.hasPrimed = true
+                    if let lastDocumentID = snapshot.documents.last?.documentID {
+                        state.lastMessageID = lastDocumentID
+                    }
+                    return
+                }
+
+                for change in snapshot.documentChanges where change.type == .added {
+                    let docID = change.document.documentID
+                    if docID == state.lastMessageID {
+                        continue
+                    }
+                    state.lastMessageID = docID
+                    self.handleIncomingMessage(
+                        document: change.document,
+                        conversationID: conversationID,
+                        conversationTitle: state.conversationTitle,
+                        currentUserID: currentUserID
+                    )
+                }
+            }
+
+        state.registration = registration
+    }
+
+    private func removeMessageListener(for conversationID: String) {
+        guard let state = messageListeners.removeValue(forKey: conversationID) else { return }
+        state.registration?.remove()
+    }
+
+    private func handleIncomingMessage(
+        document: QueryDocumentSnapshot,
+        conversationID: String,
+        conversationTitle: String?,
+        currentUserID: String
+    ) {
+        guard NotificationService.shared.currentConversationID != conversationID else { return }
+
+        let data = document.data()
+        guard let senderID = data["senderID"] as? String, senderID != currentUserID else { return }
+
+        let content = (data["content"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !content.isEmpty else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let senderName = await self.resolveDisplayName(for: senderID) ?? "New message"
+            await MainActor.run {
+                NotificationService.shared.showForegroundNotification(
+                    message: content,
+                    conversationID: conversationID,
+                    conversationTitle: conversationTitle,
+                    senderName: senderName
+                )
+            }
+        }
+    }
+
+    private func resolveDisplayName(for userID: String) async -> String? {
+        if let cached = cachedDisplayName(for: userID) {
+            return cached
+        }
+
+        do {
+            let snapshot = try await db.collection("users").document(userID).getDocument()
+            guard let data = snapshot.data() else { return nil }
+            let displayName = data["displayName"] as? String
+            let email = data["email"] as? String
+            cacheUser(userID: userID, displayName: displayName, email: email)
+            return displayName
+        } catch {
+            print("[ConversationsSync] Failed to fetch user display name: \(error)")
+            return nil
+        }
+    }
+
+    private func cachedDisplayName(for userID: String) -> String? {
+        guard let modelContext else { return nil }
+        let descriptor = FetchDescriptor<UserEntity>(
+            predicate: #Predicate { $0.id == userID }
+        )
+        return try? modelContext.fetch(descriptor).first?.displayName
+    }
+
+    private func cacheUser(userID: String, displayName: String?, email: String?) {
+        guard let modelContext, let displayName else { return }
+
+        let descriptor = FetchDescriptor<UserEntity>(
+            predicate: #Predicate { $0.id == userID }
+        )
+
+        if let existing = try? modelContext.fetch(descriptor).first {
+            existing.displayName = displayName
+            if let email { existing.email = email }
+        } else {
+            let user = UserEntity(
+                id: userID,
+                displayName: displayName,
+                email: email ?? ""
+            )
+            modelContext.insert(user)
+        }
+
+        try? modelContext.save()
     }
 }
 

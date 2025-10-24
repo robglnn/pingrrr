@@ -15,8 +15,6 @@ final class ConversationsViewModel: ObservableObject {
     private let presenceService: PresenceService
     private let notificationService: NotificationService
 
-    var cancellables: Set<AnyCancellable> = []
-
     private var observedPresenceIDs: Set<String> = []
     private var notificationObserver: AnyCancellable?
 
@@ -59,7 +57,6 @@ final class ConversationsViewModel: ObservableObject {
         observedPresenceIDs.removeAll()
         notificationObserver?.cancel()
         notificationObserver = nil
-        cancellables.removeAll()
     }
 
     func ensureConversationAvailable(conversationID: String) async {
