@@ -9,6 +9,7 @@ struct ConversationsView: View {
     @State private var activeNotification: NotificationService.ChatNotification?
     @State private var notificationDismissTask: Task<Void, Never>?
     @State private var activeSheet: ActiveSheet?
+    @State private var navigationSubscription: AnyCancellable?
 
     private let appServices: AppServices
     private let modelContext: ModelContext
@@ -20,97 +21,120 @@ struct ConversationsView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
-            ZStack {
-                backgroundGradient
-                    .ignoresSafeArea()
+        ZStack(alignment: .top) {
+            NavigationStack(path: $navigationPath) {
+                ZStack {
+                    backgroundGradient
+                        .ignoresSafeArea()
 
-                if viewModel.items.isEmpty {
-                    emptyState
-                } else {
-                    List {
-                        ForEach(viewModel.items) { conversation in
-                            NavigationLink(value: ConversationRoute(from: conversation)) {
-                                ConversationRow(
-                                    conversation: conversation,
-                                    presence: presenceData(for: conversation)
-                                )
+                    if viewModel.items.isEmpty {
+                        emptyState
+                    } else {
+                        List {
+                            ForEach(viewModel.items) { conversation in
+                                NavigationLink(value: ConversationRoute(from: conversation)) {
+                                    ConversationRow(
+                                        conversation: conversation,
+                                        presence: presenceData(for: conversation)
+                                    )
+                                }
+                                .listRowBackground(Color.clear)
                             }
-                            .listRowBackground(Color.clear)
+                        }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                    }
+                }
+                .navigationTitle("Chats")
+                .toolbar { toolbar }
+                .refreshable { await viewModel.refresh() }
+                .task { viewModel.start() }
+                .onDisappear { viewModel.stop() }
+                .navigationDestination(for: ConversationRoute.self) { route in
+                    ChatView(
+                        conversation: placeholderConversation(from: route, modelContext: modelContext),
+                        currentUserID: appServices.authService.currentUserID ?? "",
+                        modelContext: modelContext,
+                        appServices: appServices
+                    )
+                    .environment(\.modelContext, modelContext)
+                    .task {
+                        await viewModel.ensureConversationAvailable(conversationID: route.id)
+                    }
+                }
+            }
+            .overlay(alignment: .top) {
+                if let notification = activeNotification {
+                    NotificationBannerView(notification: notification) {
+                        let route = ConversationRoute(
+                            id: notification.conversationID,
+                            title: notification.conversationTitle,
+                            participantIDs: []
+                        )
+                        openConversation(with: route)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .onReceive(appServices.notificationService.$lastNotification.compactMap { $0 }) { notification in
+                presentNotification(notification)
+            }
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .settings:
+                    SettingsSheet(appServices: appServices) {
+                        activeSheet = nil
+                    }
+                case .newConversation:
+                    NewConversationSheet(appServices: appServices) { response, displayTitle, currentUserID in
+                        activeSheet = nil
+                        guard let response else { return }
+
+                        let placeholderRoute = ConversationRoute(
+                            id: response.conversationId,
+                            title: displayTitle,
+                            participantIDs: response.participantIds
+                        )
+
+                        viewModel.appendPlaceholderConversation(
+                            id: response.conversationId,
+                            title: displayTitle,
+                            participantIDs: response.participantIds,
+                            currentUserID: currentUserID
+                        )
+
+                        openConversation(with: placeholderRoute)
+
+                        Task {
+                            await viewModel.refresh()
                         }
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
                 }
             }
-            .navigationTitle("Chats")
-            .toolbar { toolbar }
-            .refreshable { await viewModel.refresh() }
-            .task { viewModel.start() }
-            .onDisappear { viewModel.stop() }
-            .navigationDestination(for: ConversationRoute.self) { route in
-                ChatView(
-                    conversation: placeholderConversation(from: route, modelContext: modelContext),
-                    currentUserID: appServices.authService.currentUserID ?? "",
-                    modelContext: modelContext,
-                    appServices: appServices
-                )
-                .environment(\.modelContext, modelContext)
-                .task {
-                    await viewModel.ensureConversationAvailable(conversationID: route.id)
-                }
-            }
-        }
-        .overlay(alignment: .top) {
-            if let notification = activeNotification {
-                NotificationBannerView(notification: notification) {
-                    let route = ConversationRoute(
-                        id: notification.conversationID,
-                        title: notification.conversationTitle,
-                        participantIDs: []
-                    )
+            .onAppear {
+                navigationSubscription = appServices.conversationNavigation
+                    .receive(on: DispatchQueue.main)
+                    .sink { routeID in
+                        let route = ConversationRoute(id: routeID, title: nil, participantIDs: [])
+                        openConversation(with: route)
+                    }
+
+                NotificationCenter.default.addObserver(forName: .navigateToConversation, object: nil, queue: .main) { notification in
+                    guard let conversationID = notification.object as? String else { return }
+                    let route = ConversationRoute(id: conversationID, title: nil, participantIDs: [])
                     openConversation(with: route)
                 }
-                .padding(.horizontal, 16)
+            }
+            .onDisappear {
+                navigationSubscription?.cancel()
+                navigationSubscription = nil
+                NotificationCenter.default.removeObserver(self, name: .navigateToConversation, object: nil)
+            }
+
+            ToastNotificationOverlay(notificationService: appServices.notificationService)
                 .padding(.top, 12)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .onReceive(appServices.notificationService.$lastNotification.compactMap { $0 }) { notification in
-            presentNotification(notification)
-        }
-        .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .settings:
-                SettingsSheet(appServices: appServices) {
-                    activeSheet = nil
-                }
-            case .newConversation:
-                NewConversationSheet(appServices: appServices) { response, displayTitle, currentUserID in
-                    activeSheet = nil
-                    guard let response else { return }
-
-                    let placeholderRoute = ConversationRoute(
-                        id: response.conversationId,
-                        title: displayTitle,
-                        participantIDs: response.participantIds
-                    )
-
-                    // Optimistically append so the list shows the new conversation
-                    viewModel.appendPlaceholderConversation(
-                        id: response.conversationId,
-                        title: displayTitle,
-                        participantIDs: response.participantIds,
-                        currentUserID: currentUserID
-                    )
-
-                    openConversation(with: placeholderRoute)
-
-                    Task {
-                        await viewModel.refresh()
-                    }
-                }
-            }
         }
     }
 

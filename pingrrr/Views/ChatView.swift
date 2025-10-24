@@ -35,6 +35,7 @@ struct ChatView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task { viewModel.start() }
         .onDisappear {
+            viewModel.userLeftChat()
             viewModel.userStoppedTyping()
         }
         .onChange(of: viewModel.draftMessage) { _, _ in
@@ -50,6 +51,7 @@ struct ChatView: View {
             }
         }
         .onAppear {
+            viewModel.userStartedViewingChat()
             Task { await viewModel.markMessagesAsRead() }
         }
     }

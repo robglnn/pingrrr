@@ -32,41 +32,21 @@ final class TypingIndicatorService {
                 guard let self else { return }
                 guard let data = snapshot?.data(),
                       let users = data["users"] as? [String],
-                      let timestamp = (data["updatedAt"] as? Timestamp)?.dateValue() else {
-                    self.updateTypingUsers([])
-                    return
-                }
-
-                if Date().timeIntervalSince(timestamp) > self.typingVisibilityWindow {
+                      let timestamp = (data["updatedAt"] as? Timestamp)?.dateValue()
+                else {
                     self.updateTypingUsers([])
                     return
                 }
 
                 let filtered = users.filter { $0 != currentUserID }
-                self.updateTypingUsers(filtered)
-            }
-
-        expirationTask = Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard self.isMonitoring,
-                      let documentID = self.conversationID,
-                      let data = try? await self.db.collection("conversations")
-                          .document(documentID)
-                          .collection("metadata")
-                          .document("typing")
-                          .getDocument(),
-                      let snapshotData = data.data(),
-                      let timestamp = (snapshotData["updatedAt"] as? Timestamp)?.dateValue() else {
-                    continue
-                }
-
                 if Date().timeIntervalSince(timestamp) > self.typingVisibilityWindow {
                     self.updateTypingUsers([])
+                    return
                 }
+
+                self.updateTypingUsers(filtered)
+                self.scheduleExpiration(at: timestamp)
             }
-        }
     }
 
     func setTyping(_ isTyping: Bool) {
@@ -110,6 +90,19 @@ final class TypingIndicatorService {
 
     private func updateTypingUsers(_ users: [String]) {
         onTypingChange?(users)
+    }
+
+    private func scheduleExpiration(at timestamp: Date) {
+        expirationTask?.cancel()
+        let deadline = timestamp.addingTimeInterval(typingVisibilityWindow)
+        let delay = max(deadline.timeIntervalSinceNow, 0)
+        let task = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self.updateTypingUsers([])
+        }
+        expirationTask = task
     }
 }
 

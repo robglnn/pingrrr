@@ -31,9 +31,9 @@ final class ConversationsSyncService {
 
                 Task { @MainActor in
                     do {
-                        try await self.replaceLocalConversations(with: snapshot.documents)
+                        try await self.processSnapshotChanges(snapshot.documentChanges)
                     } catch {
-                        print("[ConversationsSync] Failed to apply snapshot: \(error)")
+                        print("[ConversationsSync] Failed to process changes: \(error)")
                     }
                 }
             }
@@ -60,47 +60,47 @@ final class ConversationsSyncService {
         onChange = nil
     }
 
-    private func replaceLocalConversations(with documents: [QueryDocumentSnapshot]) async throws {
+    private func processSnapshotChanges(_ changes: [DocumentChange]) async throws {
         guard let modelContext, let currentUserID else { return }
 
         let existing = try modelContext.fetch(FetchDescriptor<ConversationEntity>())
         var existingMap = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
-        var seenIdentifiers: Set<String> = []
 
-        for document in documents {
-            let record = try document.data(as: ConversationRecord.self)
-            let identifier = document.documentID
-            seenIdentifiers.insert(identifier)
+        for change in changes {
+            switch change.type {
+            case .added, .modified:
+                let record = try change.document.data(as: ConversationRecord.self)
+                let identifier = change.document.documentID
+                let entity = existingMap[identifier] ?? {
+                    let newEntity = ConversationEntity(
+                        id: identifier,
+                        title: record.title,
+                        participantIDs: record.participants,
+                        type: record.type ?? .oneOnOne,
+                        lastMessageID: record.lastMessageID,
+                        lastMessagePreview: record.lastMessagePreview,
+                        lastMessageTimestamp: record.bestTimestamp ?? Date(),
+                        unreadCount: 0
+                    )
+                    modelContext.insert(newEntity)
+                    existingMap[identifier] = newEntity
+                    return newEntity
+                }()
 
-            let entity: ConversationEntity
-            if let cached = existingMap[identifier] {
-                entity = cached
-            } else {
-                entity = ConversationEntity(
-                    id: identifier,
-                    title: record.title,
-                    participantIDs: record.participants,
-                    type: record.type ?? .oneOnOne,
-                    lastMessageID: record.lastMessageID,
-                    lastMessagePreview: record.lastMessagePreview,
-                    lastMessageTimestamp: record.bestTimestamp ?? Date(),
-                    unreadCount: 0
-                )
-                modelContext.insert(entity)
-                existingMap[identifier] = entity
+                entity.title = record.title
+                entity.participantIDs = record.participants
+                entity.type = record.type ?? .oneOnOne
+                entity.lastMessageID = record.lastMessageID
+                entity.lastMessagePreview = record.lastMessagePreview
+                entity.lastMessageTimestamp = record.bestTimestamp ?? entity.lastMessageTimestamp ?? Date()
+                entity.unreadCount = record.unreadCounts?[currentUserID] ?? 0
+            case .removed:
+                let identifier = change.document.documentID
+                if let entity = existingMap[identifier] {
+                    modelContext.delete(entity)
+                    existingMap.removeValue(forKey: identifier)
+                }
             }
-
-            entity.title = record.title
-            entity.participantIDs = record.participants
-            entity.type = record.type ?? .oneOnOne
-            entity.lastMessageID = record.lastMessageID
-            entity.lastMessagePreview = record.lastMessagePreview
-            entity.lastMessageTimestamp = record.bestTimestamp ?? entity.lastMessageTimestamp ?? Date()
-            entity.unreadCount = record.unreadCounts?[currentUserID] ?? 0
-        }
-
-        for (identifier, entity) in existingMap where !seenIdentifiers.contains(identifier) {
-            modelContext.delete(entity)
         }
 
         try modelContext.save()
@@ -118,6 +118,8 @@ private struct ConversationRecord: Codable {
     var lastMessageTimestamp: Date?
     var unreadCounts: [String: Int]?
     var createdAt: Date?
+    var lastMessageSenderID: String?
+    var senderDisplayName: String?
 
     var type: ConversationType? {
         guard let typeRawValue else { return nil }
@@ -137,7 +139,9 @@ private struct ConversationRecord: Codable {
         lastMessagePreview: String? = nil,
         lastMessageTimestamp: Date? = nil,
         unreadCounts: [String: Int]? = nil,
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        lastMessageSenderID: String? = nil,
+        senderDisplayName: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -148,6 +152,8 @@ private struct ConversationRecord: Codable {
         self.lastMessageTimestamp = lastMessageTimestamp
         self.unreadCounts = unreadCounts
         self.createdAt = createdAt
+        self.lastMessageSenderID = lastMessageSenderID
+        self.senderDisplayName = senderDisplayName
     }
 
     init(from decoder: Decoder) throws {
@@ -178,6 +184,9 @@ private struct ConversationRecord: Codable {
         } else {
             unreadCounts = nil
         }
+
+        lastMessageSenderID = try container.decodeIfPresent(String.self, forKey: .lastMessageSenderID)
+        senderDisplayName = try container.decodeIfPresent(String.self, forKey: .senderDisplayName)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -189,6 +198,8 @@ private struct ConversationRecord: Codable {
         case lastMessageTimestamp = "lastMessageTimestamp"
         case unreadCounts = "unreadCounts"
         case createdAt = "createdAt"
+        case lastMessageSenderID = "lastMessageSenderID"
+        case senderDisplayName = "senderDisplayName"
     }
 }
 

@@ -5,6 +5,11 @@ import UIKit
 import FirebaseMessaging
 import FirebaseAuth
 import FirebaseFirestore
+import AVFoundation
+
+extension Notification.Name {
+    static let navigateToConversation = Notification.Name("navigateToConversation")
+}
 
 @MainActor
 final class NotificationService: NSObject, ObservableObject {
@@ -21,8 +26,34 @@ final class NotificationService: NSObject, ObservableObject {
         let conversationTitle: String?
     }
 
+    struct ToastNotification: Identifiable, Equatable {
+        let id: String
+        let conversationID: String
+        let conversationTitle: String?
+        let senderName: String
+        let message: String
+        let timestamp: Date
+
+        var displayTitle: String {
+            conversationTitle ?? "Chat"
+        }
+
+        var displayMessage: String {
+            message.isEmpty ? senderName : "\(senderName): \(message)"
+        }
+    }
+
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var lastNotification: ChatNotification?
+    @Published private(set) var currentToast: ToastNotification?
+
+    private var currentChatID: String?
+    private var recentChatActivity: [String: Date] = [:]
+    private var toastHideWorkItem: DispatchWorkItem?
+
+    var currentConversationID: String? {
+        currentChatID
+    }
 
     private override init() {
         super.init()
@@ -68,6 +99,68 @@ final class NotificationService: NSObject, ObservableObject {
 
     func clearLastNotification() {
         lastNotification = nil
+    }
+
+    func showForegroundNotification(
+        message: String,
+        conversationID: String,
+        conversationTitle: String?,
+        senderName: String
+    ) {
+        guard UIApplication.shared.applicationState == .active else { return }
+        guard !isInDoNotDisturb() else {
+            print("[NotificationService] Suppressing toast (Do Not Disturb)")
+            return
+        }
+
+        if isInConversation(conversationID) {
+            markChatAsRecentlyActive(conversationID)
+            return
+        }
+
+        if isRecentlyActive(conversationID) {
+            return
+        }
+
+        if currentToast != nil {
+            return
+        }
+
+        let toast = ToastNotification(
+            id: UUID().uuidString,
+            conversationID: conversationID,
+            conversationTitle: conversationTitle,
+            senderName: senderName,
+            message: message,
+            timestamp: Date()
+        )
+
+        currentToast = toast
+        scheduleToastHide()
+        markChatAsRecentlyActive(conversationID)
+    }
+
+    func hideCurrentToast() {
+        toastHideWorkItem?.cancel()
+        toastHideWorkItem = nil
+        currentToast = nil
+    }
+
+    func setCurrentChatID(_ chatID: String) {
+        currentChatID = chatID
+        markChatAsRecentlyActive(chatID)
+        hideCurrentToast()
+    }
+
+    func clearCurrentChatID() {
+        if let chatID = currentChatID {
+            markChatAsRecentlyActive(chatID)
+        }
+        currentChatID = nil
+    }
+
+    func markChatAsRecentlyActive(_ chatID: String) {
+        recentChatActivity[chatID] = Date()
     }
 
     private func handleIncomingNotification(userInfo: [AnyHashable: Any]) {
@@ -123,6 +216,32 @@ final class NotificationService: NSObject, ObservableObject {
             timestamp: timestamp,
             conversationTitle: userInfo["conversationTitle"] as? String
         )
+    }
+
+    private func isInDoNotDisturb() -> Bool {
+        if #available(iOS 15.0, *) {
+            return AVAudioSession.sharedInstance().secondaryAudioShouldBeSilencedHint
+        }
+        return false
+    }
+
+    func isInConversation(_ conversationID: String) -> Bool {
+        currentChatID == conversationID
+    }
+
+    private func isRecentlyActive(_ chatID: String, within seconds: TimeInterval = 5) -> Bool {
+        guard let last = recentChatActivity[chatID] else { return false }
+        return Date().timeIntervalSince(last) < seconds
+    }
+
+    private func scheduleToastHide() {
+        toastHideWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.currentToast = nil
+            self?.toastHideWorkItem = nil
+        }
+        toastHideWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: workItem)
     }
 }
 

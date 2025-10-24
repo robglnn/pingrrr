@@ -46,6 +46,7 @@ final class ChatViewModel: ObservableObject {
 
     func start() {
         print("[ChatViewModel] start conversationID=\(conversationID)")
+        NotificationService.shared.setCurrentChatID(conversationID)
         messageSyncService.start(
             conversationID: conversationID,
             userID: currentUserID,
@@ -72,6 +73,7 @@ final class ChatViewModel: ObservableObject {
         typingIndicatorService.stop()
         typingTimeoutWorkItem?.cancel()
         typingTimeoutWorkItem = nil
+        NotificationService.shared.clearCurrentChatID()
         removePresenceObservers()
     }
 
@@ -212,6 +214,15 @@ final class ChatViewModel: ObservableObject {
         typingTimeoutWorkItem?.cancel()
         typingTimeoutWorkItem = nil
         typingIndicatorService.setTyping(false)
+        NotificationService.shared.markChatAsRecentlyActive(conversationID)
+    }
+
+    func userStartedViewingChat() {
+        NotificationService.shared.setCurrentChatID(conversationID)
+    }
+
+    func userLeftChat() {
+        NotificationService.shared.clearCurrentChatID()
     }
 
     func loadCachedMessages() {

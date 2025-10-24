@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import Combine
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -11,12 +10,17 @@ struct RootContainerView: View {
     @StateObject private var appServices = AppServices()
 
     var body: some View {
-        Group {
-            if appServices.sessionState == .authenticated {
-                ConversationsView(appServices: appServices, modelContext: modelContext)
-            } else {
-                AuthenticationFlowView(appServices: appServices)
+        ZStack(alignment: .top) {
+            Group {
+                if appServices.sessionState == .authenticated {
+                    ConversationsView(appServices: appServices, modelContext: modelContext)
+                } else {
+                    AuthenticationFlowView(appServices: appServices)
+                }
             }
+
+            ToastNotificationOverlay(notificationService: appServices.notificationService)
+                .padding(.top, 12)
         }
         .onChange(of: scenePhase) { _, newPhase in
             appServices.handleScenePhaseChange(newPhase)
@@ -84,8 +88,12 @@ final class AppServices: ObservableObject {
             switch phase {
             case .active:
                 await presenceService.updatePresence(isOnline: true)
+                NotificationCenter.default.post(name: .navigateToConversation, object: nil)
+                notificationService.hideCurrentToast()
             case .background:
                 await presenceService.updatePresence(isOnline: false)
+                NotificationCenter.default.post(name: .navigateToConversation, object: nil)
+                notificationService.hideCurrentToast()
             case .inactive:
                 break
             @unknown default:
@@ -94,16 +102,20 @@ final class AppServices: ObservableObject {
         }
     }
 
+    func openConversation(fromNotification conversationID: String) {
+        conversationNavigation.send(conversationID)
+    }
+
     func signIn(email: String, password: String) async throws {
         try await authService.signIn(email: email, password: password)
     }
 
     func signInWithGoogle(presenting viewController: UIViewController? = nil) async throws {
-        try await authService.signInWithGoogle(presenting: viewController)
+        try authService.signInWithGoogle(presenting: viewController)
     }
 
     func signUp(email: String, password: String, displayName: String) async throws {
-        try await authService.signUp(email: email, password: password, displayName: displayName)
+        try authService.signUp(email: email, password: password, displayName: displayName)
     }
 
     func signOut() throws {
