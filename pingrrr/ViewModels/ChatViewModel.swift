@@ -205,17 +205,13 @@ final class ChatViewModel: ObservableObject {
 
     func userStartedTyping() {
         typingIndicatorService.setTyping(true)
-        typingTimeoutWorkItem?.cancel()
+        scheduleTypingTimeout()
     }
 
     func userStoppedTyping() {
         typingTimeoutWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.typingIndicatorService.setTyping(false)
-        }
-        typingTimeoutWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + typingTimeout, execute: workItem)
+        typingTimeoutWorkItem = nil
+        typingIndicatorService.setTyping(false)
     }
 
     func loadCachedMessages() {
@@ -249,6 +245,17 @@ final class ChatViewModel: ObservableObject {
         conversation.lastMessageID = messageID
         conversation.unreadCount = 0
         try? modelContext.save()
+    }
+
+    private func scheduleTypingTimeout() {
+        typingTimeoutWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.typingIndicatorService.setTyping(false)
+            self.typingTimeoutWorkItem = nil
+        }
+        typingTimeoutWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + typingTimeout, execute: workItem)
     }
 
     private func observePresence() {
