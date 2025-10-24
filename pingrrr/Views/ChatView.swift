@@ -276,42 +276,44 @@ private struct MessageRowView: View {
 
     @ViewBuilder
     private var statusIcon: some View {
-        switch item.message.status {
-        case .sending:
-            Image(systemName: "clock")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        case .sent:
-            Image(systemName: "checkmark")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        case .delivered:
-            Image(systemName: "checkmark.circle")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        case .read:
-            if !readReceiptEntries.isEmpty {
-                OverlappingStatusAvatars(entries: readReceiptEntries)
-                    .onTapGesture {
-                        showReceipts = true
-                    }
-                    .sheet(isPresented: $showReceipts) {
-                        ReadReceiptsView(
-                            message: item.message,
-                            participants: viewModel.readReceiptProfiles
-                        )
-                        .presentationDetents([.height(320)])
-                    }
-            } else {
+        let receipts = readReceiptEntries
+
+        if !receipts.isEmpty {
+            OverlappingStatusAvatars(entries: receipts)
+                .onTapGesture {
+                    showReceipts = true
+                }
+                .sheet(isPresented: $showReceipts) {
+                    ReadReceiptsView(
+                        message: item.message,
+                        participants: viewModel.readReceiptProfiles
+                    )
+                    .presentationDetents([.height(320)])
+                }
+        } else {
+            switch item.message.status {
+            case .sending:
+                Image(systemName: "clock")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            case .sent:
+                Image(systemName: "checkmark")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            case .delivered:
+                Image(systemName: "checkmark.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            case .read:
                 Image(systemName: "checkmark.circle.fill")
                     .font(.caption2)
                     .foregroundStyle(.blue)
-            }
-        case .failed:
-            Button(action: onRetry) {
-                Image(systemName: "exclamationmark.circle")
-                    .font(.caption2)
-                    .foregroundStyle(.red)
+            case .failed:
+                Button(action: onRetry) {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
             }
         }
     }
