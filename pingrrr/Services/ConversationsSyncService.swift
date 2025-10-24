@@ -106,6 +106,51 @@ final class ConversationsSyncService {
         try modelContext.save()
         onChange?()
     }
+
+    private func replaceLocalConversations(with documents: [QueryDocumentSnapshot]) async throws {
+        guard let modelContext, let currentUserID else { return }
+
+        let existing = try modelContext.fetch(FetchDescriptor<ConversationEntity>())
+        var existingMap = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        var seenIdentifiers: Set<String> = []
+
+        for document in documents {
+            let record = try document.data(as: ConversationRecord.self)
+            let identifier = document.documentID
+            seenIdentifiers.insert(identifier)
+
+            let entity = existingMap[identifier] ?? {
+                let newEntity = ConversationEntity(
+                    id: identifier,
+                    title: record.title,
+                    participantIDs: record.participants,
+                    type: record.type ?? .oneOnOne,
+                    lastMessageID: record.lastMessageID,
+                    lastMessagePreview: record.lastMessagePreview,
+                    lastMessageTimestamp: record.bestTimestamp ?? Date(),
+                    unreadCount: 0
+                )
+                modelContext.insert(newEntity)
+                existingMap[identifier] = newEntity
+                return newEntity
+            }()
+
+            entity.title = record.title
+            entity.participantIDs = record.participants
+            entity.type = record.type ?? .oneOnOne
+            entity.lastMessageID = record.lastMessageID
+            entity.lastMessagePreview = record.lastMessagePreview
+            entity.lastMessageTimestamp = record.bestTimestamp ?? entity.lastMessageTimestamp ?? Date()
+            entity.unreadCount = record.unreadCounts?[currentUserID] ?? 0
+        }
+
+        for (identifier, entity) in existingMap where !seenIdentifiers.contains(identifier) {
+            modelContext.delete(entity)
+        }
+
+        try modelContext.save()
+        onChange?()
+    }
 }
 
 private struct ConversationRecord: Codable {

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Combine
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -41,6 +42,7 @@ final class AppServices: ObservableObject {
     let networkMonitor = NetworkMonitor()
     lazy var outgoingMessageQueue = OutgoingMessageQueue(networkMonitor: networkMonitor)
     let conversationService = ConversationService()
+    let conversationNavigation = PassthroughSubject<String, Never>()
 
     private var modelContext: ModelContext?
     private var hasConfigured = false
@@ -111,11 +113,11 @@ final class AppServices: ObservableObject {
     }
 
     func signInWithGoogle(presenting viewController: UIViewController? = nil) async throws {
-        try authService.signInWithGoogle(presenting: viewController)
+        try await authService.signInWithGoogle(presenting: viewController)
     }
 
     func signUp(email: String, password: String, displayName: String) async throws {
-        try authService.signUp(email: email, password: password, displayName: displayName)
+        try await authService.signUp(email: email, password: password, displayName: displayName)
     }
 
     func signOut() throws {
