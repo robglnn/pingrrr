@@ -112,6 +112,7 @@ struct ChatView: View {
                     ForEach(viewModel.displayItems) { item in
                         MessageRowView(
                             item: item,
+                            viewModel: viewModel,
                             onRetry: { Task { await viewModel.retrySendingMessage(item.message) } }
                         )
                         .id(item.id)
@@ -217,6 +218,7 @@ struct ChatView: View {
 
 private struct MessageRowView: View {
     let item: ChatViewModel.MessageDisplayItem
+    let viewModel: ChatViewModel
     let onRetry: () -> Void
 
     var body: some View {
@@ -288,9 +290,23 @@ private struct MessageRowView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         case .read:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.caption2)
-                .foregroundStyle(.blue)
+            if !readReceiptEntries.isEmpty {
+                OverlappingStatusAvatars(entries: readReceiptEntries)
+                    .onTapGesture {
+                        showReceipts = true
+                    }
+                    .sheet(isPresented: $showReceipts) {
+                        ReadReceiptsView(
+                            message: item.message,
+                            participants: viewModel.readReceiptProfiles
+                        )
+                        .presentationDetents([.height(320)])
+                    }
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.blue)
+            }
         case .failed:
             Button(action: onRetry) {
                 Image(systemName: "exclamationmark.circle")
@@ -298,6 +314,18 @@ private struct MessageRowView: View {
                     .foregroundStyle(.red)
             }
         }
+    }
+
+    @State private var showReceipts = false
+
+    private var readReceiptEntries: [ReadReceiptEntry] {
+        guard item.isCurrentUser else { return [] }
+        return item.message.readBy
+            .filter { $0 != item.message.senderID }
+            .compactMap { userID -> ReadReceiptEntry? in
+                guard let profile = viewModel.readReceiptProfiles[userID] ?? viewModel.cachedProfile(for: userID) else { return nil }
+                return ReadReceiptEntry(userID: userID, profile: profile)
+            }
     }
 
     @ViewBuilder
@@ -353,4 +381,58 @@ private enum Formatter {
         formatter.unitsStyle = .short
         return formatter
     }()
+}
+
+private struct ReadReceiptEntry: Identifiable {
+    let id = UUID()
+    let userID: String
+    let profile: UserProfile
+
+    var avatar: some View {
+        Group {
+            if let urlString = profile.profilePictureURL, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image.resizable().scaledToFill()
+                    default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+    }
+
+    private var placeholder: some View {
+        Circle()
+            .fill(Color.blue.opacity(0.2))
+            .overlay(
+                Text(profile.displayName.prefix(1).uppercased())
+                    .font(.caption.bold())
+                    .foregroundColor(.blue)
+            )
+    }
+}
+
+private struct OverlappingStatusAvatars: View {
+    let entries: [ReadReceiptEntry]
+
+    var body: some View {
+        HStack(spacing: -6) {
+            ForEach(entries.prefix(3), id: \.id) { entry in
+                entry.avatar
+                    .frame(width: 16, height: 16)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
+            }
+            if entries.count > 3 {
+                Text("+\(entries.count - 3)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+            }
+        }
+    }
 }

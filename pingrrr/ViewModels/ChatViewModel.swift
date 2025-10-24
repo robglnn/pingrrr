@@ -7,6 +7,7 @@ import FirebaseFirestore
 final class ChatViewModel: ObservableObject {
     @Published private(set) var messages: [MessageEntity] = []
     @Published private(set) var displayItems: [MessageDisplayItem] = []
+    @Published private(set) var readReceiptProfiles: [String: UserProfile] = [:]
     @Published private(set) var isSending = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var isTyping = false
@@ -113,6 +114,7 @@ final class ChatViewModel: ObservableObject {
         modelContext.insert(optimisticMessage)
         messages.append(optimisticMessage)
         regroupMessages()
+        updateReadReceiptProfiles()
         draftMessage = ""
 
         updateConversationForOutgoingMessage(content: trimmed, timestamp: now, messageID: tempID)
@@ -239,6 +241,7 @@ final class ChatViewModel: ObservableObject {
         )
         messages = (try? modelContext.fetch(descriptor)) ?? []
         regroupMessages()
+        updateReadReceiptProfiles()
         refreshConversationReference()
     }
 
@@ -411,11 +414,36 @@ final class ChatViewModel: ObservableObject {
             }
 
             regroupMessages()
+            updateReadReceiptProfiles()
         }
     }
 
     func cachedProfile(for userID: String) -> UserProfile? {
         userProfiles[userID]
+    }
+
+    private func updateReadReceiptProfiles() {
+        var map: [String: UserProfile] = [:]
+        for message in messages {
+            for userID in message.readBy where map[userID] == nil {
+                if let cached = userProfiles[userID] {
+                    map[userID] = cached
+                } else {
+                    attemptedProfileFetches.insert(userID)
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        do {
+                            let profile = try await self.profileService.fetchUserProfile(userID: userID)
+                            self.userProfiles[userID] = profile
+                            self.readReceiptProfiles[userID] = profile
+                        } catch {
+                            print("[ChatViewModel] Failed to fetch read receipt profile for \(userID): \(error)")
+                        }
+                    }
+                }
+            }
+        }
+        readReceiptProfiles = map
     }
 
     struct MessageDisplayItem: Identifiable {
