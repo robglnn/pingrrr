@@ -4,5 +4,7 @@ export { aiCulturalHint } from './culturalHint';
 export { aiAdjustTone } from './adjustTone';
 export { aiExplainSlang } from './explainSlang';
 export { aiSmartReplies } from './smartReplies';
+export { aiSummarize } from './summarize';
+export { aiAssistant } from './assistant';
 
 

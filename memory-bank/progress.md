@@ -2,14 +2,15 @@
 
 ## Status Summary (Oct 25, 2025)
 - Voice messaging end-to-end functional with Firebase Storage uploads, lazy playback, and auto-delete warning.
-- Mic permission string added; in-app warning now persists per user across devices via Firestore flag.
-- Inline translations (AI integration) wired into chat UI with globe toggle, context menu, and caching.
+- Inline AI actions (translation, cultural hints, slang explanations, tone adjustments) available via long press with contextual insight bubbles.
+- Firebase Functions deployed with OpenAI secret + Vercel AI SDK; Vercel project configured with matching env variables.
+- Dedicated AI Assistant chat view added to conversations list with context selection, quick actions, and assistant responses.
 
 ## Recent Highlights
-- Created dedicated `VoiceMessageService` managing recording, uploads, duration caps, and warning state.
-- Added `AIService` and `AIPreferencesService` for translation pipeline and per-user preferences.
-- Updated `ChatView` and `ChatViewModel` for mic/send toggle, translation UI, and voice flow.
-- Introduced notification extension helpers and permission strings in Info.plist.
+- Added `AIService`/`AIPreferencesService` plus callable endpoints for translate/detect/hint/tone/slang/smart replies/summarize/assistant.
+- Contextual globe toggle hooked into ChatViewModel with caching; long-press menu triggers additional AI helpers and insight cards.
+- Deployed updated Firestore rules + secret-managed functions; verified build using `npm run build` and `firebase deploy`.
+- Set up Vercel project and stored `OPENAI_API_KEY` for future edge/preview work.
 
 ## Status Summary (Oct 24, 2025)
 - Core messaging foundation in place with SwiftData + Firestore sync, presence, and notification pipeline.
@@ -20,18 +21,22 @@
 - Documented project brief, product context, system patterns, tech context, and active context.
 - Implemented Firebase-integrated profile editing (callable function, storage rules, ProfileService/UI).
 - Added WhatsApp-style grouped message presentation with avatar/name logic and profile prefetching.
+- Delivered AI contextual actions (translation, slang explanation, cultural hints, tone adjustment) with inline insight UI.
+- Built AI Assistant chat view with quick actions and assistant responses.
 
 ## In Progress
-- Planning and implementation of enhanced messaging features (local chat deletion, read receipts, media, voice).
+- Translation toggle UX polish (globe tap feedback) and assistant history storage.
+- Smart replies row + thumbs feedback and proactive suggestion logic.
+- Rate-limit UX + metrics instrumentation outlined in plan.
 
 ## Blockers / Risks
 - Tight MVP deadline demands efficient sequencing and rigorous regression testing.
-- Need to ensure Firebase Storage/Functions deployments stay aligned with feature rollout (media/voice).
+- Need to ensure Firebase Storage/Functions deployments stay aligned with feature rollout (media/voice + AI).
+- Node.js 18 Cloud Functions runtime deprecates Oct 30, 2025—upgrade path to Node 20 required soon.
 
 ## Upcoming Tasks
-- Local-only swipe-to-delete conversations.
-- Group read receipts UX (overlapping avatars, popover details).
-- Media sharing pipeline with caching, camera/library support.
-- Voice message recording/playback with auto-cleanup policies.
-- Extended testing scenarios covering grouped messaging, profile updates, and offline sync.
+- Implement smart replies surface and feedback loop; add proactive triggers (language switch, typing pause).
+- Surface rate-limit messaging (20 requests/day) and aggregate latency/token metrics.
+- Clean up translation toggle experience and verify in multi-language chats.
+- Extended testing covering AI insight flows, assistant interactions, voice messaging, and offline sync.
 

@@ -91,17 +91,46 @@ final class AIService {
         return adjusted
     }
 
-    func smartReplies(conversationID: String, lastN: Int = 10, count: Int = 3) async throws -> [String] {
+    func smartReplies(conversationID: String, lastN: Int = 10, count: Int = 3, includeFullHistory: Bool = false) async throws -> [String] {
         let data = try await call(function: "aiSmartReplies", payload: [
             "conversationId": conversationID,
             "lastN": lastN,
             "replyCount": count,
+            "includeFullHistory": includeFullHistory,
         ])
 
         guard let replies = data["replies"] as? [String] else {
             throw AIServiceError.invalidResponse
         }
         return replies
+    }
+
+    func summarizeConversation(conversationID: String, lastN: Int = 50, includeFullHistory: Bool = false) async throws -> String {
+        let data = try await call(function: "aiSummarize", payload: [
+            "conversationId": conversationID,
+            "lastN": lastN,
+            "includeFullHistory": includeFullHistory,
+            "promptStyle": "concise",
+        ])
+
+        guard let summary = data["summary"] as? String else {
+            throw AIServiceError.invalidResponse
+        }
+        return summary
+    }
+
+    func assistantReply(prompt: String, conversationID: String?, lastN: Int = 10, includeFullHistory: Bool = false) async throws -> String {
+        let data = try await call(function: "aiAssistant", payload: [
+            "prompt": prompt,
+            "conversationId": conversationID as Any,
+            "lastN": lastN,
+            "includeFullHistory": includeFullHistory,
+        ])
+
+        guard let reply = data["reply"] as? String else {
+            throw AIServiceError.invalidResponse
+        }
+        return reply
     }
 
     private func call(function name: String, payload: [String: Any]) async throws -> [String: Any] {

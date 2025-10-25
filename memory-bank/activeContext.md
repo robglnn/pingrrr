@@ -1,25 +1,24 @@
 # Active Context – Pingrrr
 
-## Current Focus (Oct 24, 2025)
-- Ship MVP-critical messaging refinements (profile editing, smart message display, local chat deletion, read receipts, media/voice pipelines).
-- Maintain reliability and low-latency sync while layering new UX polish.
-- Keep work aligned with `MVPtasks.md`, `MVPcriticalrequirements.md`, and performance rubric targets.
+## Current Focus (Oct 25, 2025)
+- Stand up the post-MVP AI stack: callable functions backed by Vercel AI SDK + OpenAI, contextual in-chat actions, and upcoming AI assistant experience.
+- Maintain messaging reliability (SwiftData + Firestore) while layering AI without regressing latency.
+- Keep implementation aligned with `ping.plan.md`, covering translation, cultural guidance, smart replies, and proactive assistance.
 
 ## Recent Actions
-- Delivered profile management: profile photo upload via Firebase Storage, display name editing, rules deployed, callable function wired.
-- Implemented WhatsApp-style message grouping in chat view with sender name/avatar logic and profile prefetching.
-- Hardened foreground notification pipeline for new messages and verified clean builds post-integration.
+- Deployed new callable functions (`aiTranslate`, `aiDetectLang`, `aiCulturalHint`, `aiAdjustTone`, `aiExplainSlang`, `aiSmartReplies`, `aiSummarize`, `aiAssistant`) with Firebase Secrets + OpenAI key.
+- Wired `AIService`/`AIPreferencesService` on iOS; long-press actions now surface translation, slang explanations, cultural hints, and tone adjustments inline.
+- Added contextual insight bubbles in chat UI and ensured Firestore/Vercel secrets are configured.
+- Built the dedicated AI Assistant chat view with context selection, quick actions, and assistant responses.
 
 ## Immediate Next Steps
-- Add swipe-to-delete conversations (local only) with confirmation flow.
-- Build read receipts UI (overlapping avatars + popover) and ensure data pipeline is ready.
-- Implement media sharing pipeline with caching, camera/library pickers, and background fetches.
-- Develop voice message capture/playback (30s cap, read on play, auto-delete warning) leveraging `VoiceMessageService` scaffolding.
-- Expand testing matrix: new chat creation, grouped message rendering, profile updates, media uploads, offline delivery.
+- Polish translation toggle UX (globe button feedback) and capture translation history for assistant chat.
+- Implement smart replies surface + thumbs feedback and proactive prompts (language switch, typing pause).
+- Add rate-limit UX (20 req/day) and latency/token logging per plan.
+- Begin integrating assistant responses with saved history (aiHistory) for future analytics.
 
 ## Key Considerations
-- Preserve sub-200 ms delivery by keeping snapshot listeners scoped and caches efficient.
-- Ensure dark-mode visual consistency (avatars, bubbles, toasts) across new UI elements.
-- Coordinate Firebase rules/functions deployment as new media/voice features come online.
-- Monitor SwiftData persistence for grouped view alignment to avoid duplicate rendering or stale reads.
+- Monitor Firestore/Storage footprint; simulator previously hit space limits from cached media + offline DB.
+- Plan migration to Node 20 / `firebase-functions` ≥5.1.0 before Oct 30 deprecation.
+- Maintain dark-mode visual consistency for new AI UI elements and ensure accessibility (copy buttons, status spinners).
 
