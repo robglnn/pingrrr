@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import Combine
 
 struct UserProfile: Codable, Identifiable, Sendable {
     let id: String
@@ -186,6 +187,7 @@ final class MessageEntity {
     var nextRetryTimestamp: Date?
     var mediaURL: String?
     var mediaTypeRawValue: String?
+    var voiceDurationSeconds: Double?
 
     // Temporarily removing relationship for build compatibility
     // @Relationship(deleteRule: .nullify, inverse: \ConversationEntity.messages)
@@ -204,7 +206,8 @@ final class MessageEntity {
         retryCount: Int = 0,
         nextRetryTimestamp: Date? = nil,
         mediaURL: String? = nil,
-        mediaType: MessageMediaType? = nil
+        mediaType: MessageMediaType? = nil,
+        voiceDurationSeconds: Double? = nil
     ) {
         self.id = id
         self.conversationID = conversationID
@@ -219,6 +222,7 @@ final class MessageEntity {
         self.nextRetryTimestamp = nextRetryTimestamp
         self.mediaURL = mediaURL
         self.mediaTypeRawValue = mediaType?.rawValue
+        self.voiceDurationSeconds = voiceDurationSeconds
     }
 
     var status: MessageStatus {
@@ -244,6 +248,11 @@ final class MessageEntity {
     var mediaURLValue: URL? {
         guard let mediaURL else { return nil }
         return URL(string: mediaURL)
+    }
+
+    var voiceDuration: TimeInterval? {
+        get { voiceDurationSeconds }
+        set { voiceDurationSeconds = newValue }
     }
 
     static func encodeIDs(_ ids: [String]) -> String {

@@ -111,7 +111,6 @@ final class MessageSyncService {
         if let existing = try? context.fetch(descriptor).first {
             entity = existing
         } else {
-            let mediaType = record.mediaType.flatMap(MessageMediaType.init(rawValue:))
             entity = MessageEntity(
                 id: identifier,
                 conversationID: record.conversationID ?? conversationID ?? "",
@@ -125,7 +124,8 @@ final class MessageSyncService {
                 retryCount: 0,
                 nextRetryTimestamp: nil,
                 mediaURL: record.mediaURL,
-                mediaType: mediaType
+                mediaType: record.mediaType.flatMap(MessageMediaType.init(rawValue:)),
+                voiceDurationSeconds: record.voiceDuration
             )
             context.insert(entity)
         }
@@ -149,6 +149,7 @@ final class MessageSyncService {
         } else {
             entity.mediaType = nil
         }
+        entity.voiceDuration = record.voiceDuration
 
         if let timestamp = record.timestamp {
             entity.timestamp = timestamp
@@ -330,6 +331,7 @@ private struct MessageRecord: Codable {
     var unreadCounts: [String: Int]?
     var mediaURL: String?
     var mediaType: String?
+    var voiceDuration: Double?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -343,6 +345,7 @@ private struct MessageRecord: Codable {
         case unreadCounts
         case mediaURL
         case mediaType
+        case voiceDuration
     }
 
     init(

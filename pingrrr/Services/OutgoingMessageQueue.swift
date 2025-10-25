@@ -180,6 +180,9 @@ final class OutgoingMessageQueue {
         if let mediaURL = message.mediaURL {
             payload["mediaURL"] = mediaURL
             payload["mediaType"] = message.mediaType?.rawValue
+            if let duration = message.voiceDuration {
+                payload["voiceDuration"] = duration
+            }
         }
 
         return payload

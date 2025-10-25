@@ -65,7 +65,7 @@ final class NotificationService: NSObject, ObservableObject {
     func requestAuthorization() async {
         let center = UNUserNotificationCenter.current()
         do {
-            let settings = try await center.notificationSettings()
+            let settings = await center.notificationSettings()
             authorizationStatus = settings.authorizationStatus
 
             guard settings.authorizationStatus == .notDetermined else { return }

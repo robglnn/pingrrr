@@ -27,17 +27,44 @@ final class ChatViewModel: ObservableObject {
     private let conversationID: String
     private let currentUserID: String
     private var conversation: ConversationEntity?
-    private let profileService = ProfileService()
     private var userProfiles: [String: UserProfile] = [:]
     private var attemptedProfileFetches: Set<String> = []
+    private var profileService: ProfileService {
+        appServices.profileService
+    }
+
+    private var voiceService: VoiceMessageService {
+        appServices.voiceMessageService
+    }
+
+    private var aiPreferences: AIPreferences {
+        AIPreferencesService.shared.preferences
+    }
+
     private var outgoingQueue: OutgoingMessageQueue {
         appServices.outgoingMessageQueue
     }
+
     private var presenceService: PresenceService {
         appServices.presenceService
     }
-    @Published private(set) var presenceSnapshot: PresenceService.Snapshot?
+
+    @Published private(set) var isVoiceRecording = false
+    @Published private(set) var voiceRecordingDuration: TimeInterval = 0
+    @Published private(set) var hasShownVoiceWarning = false
     @Published private(set) var pendingMedia: PendingMedia?
+    @Published private(set) var presenceSnapshot: PresenceService.Snapshot?
+    @Published private(set) var isAIProcessingTranslation = false
+
+    private var translationCache: [String: String] = [:]
+    private var translationVisibility: [String: Bool] = [:]
+    private var aiProcessingFlag = false
+
+    var aiIsProcessingTranslation: Bool {
+        isAIProcessingTranslation
+    }
+
+    private var cancellables: Set<AnyCancellable> = []
 
     init(
         conversation: ConversationEntity,
@@ -52,6 +79,24 @@ final class ChatViewModel: ObservableObject {
         self.conversation = conversation
         loadCachedMessages()
         refreshConversationReference()
+
+        voiceService.$isRecording
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isRecording in
+                self?.isVoiceRecording = isRecording
+            }
+            .store(in: &cancellables)
+
+        voiceService.$recordingDuration
+            .receive(on: RunLoop.main)
+            .sink { [weak self] duration in
+                self?.voiceRecordingDuration = duration
+            }
+            .store(in: &cancellables)
+
+        voiceService.onAutoStop = { [weak self] in
+            Task { await self?.handleAutoStopRecording() }
+        }
     }
 
     func start() {
@@ -101,6 +146,61 @@ final class ChatViewModel: ObservableObject {
         draftMessage = ""
     }
 
+    func toggleInlineTranslation() async {
+        guard let lastMessage = messages.last else { return }
+        await toggleTranslation(for: lastMessage)
+    }
+
+    func toggleTranslation(for messageID: String?) async {
+        guard let messageID,
+              let message = messages.first(where: { $0.id == messageID }) else {
+            return
+        }
+        await toggleTranslation(for: message)
+    }
+
+    var lastMessageID: String? {
+        messages.last?.id
+    }
+
+    private func toggleTranslation(for message: MessageEntity) async {
+        if translationVisibility[message.id] == true {
+            translationVisibility[message.id] = false
+            message.translatedContent = nil
+            regroupMessages()
+            return
+        }
+
+        guard !aiProcessingFlag else { return }
+        aiProcessingFlag = true
+        isAIProcessingTranslation = true
+        defer {
+            aiProcessingFlag = false
+            isAIProcessingTranslation = false
+        }
+
+        if let cached = translationCache[message.id] {
+            message.translatedContent = cached
+            translationVisibility[message.id] = true
+            regroupMessages()
+            return
+        }
+
+        do {
+            let translated = try await AIService.shared.translate(
+                text: message.content,
+                targetLang: aiPreferences.primaryLanguage,
+                formality: aiPreferences.defaultFormality
+            )
+            translationCache[message.id] = translated
+            message.translatedContent = translated
+            translationVisibility[message.id] = true
+            regroupMessages()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     struct PendingMedia {
         enum State {
             case ready
@@ -111,13 +211,14 @@ final class ChatViewModel: ObservableObject {
         var type: MessageMediaType
         var thumbnailData: Data?
         var state: State
+        var duration: TimeInterval?
 
         mutating func markUploading() {
             state = .uploading
         }
     }
 
-    func enqueuePendingMedia(data: Data, type: MessageMediaType) async {
+    func enqueuePendingMedia(data: Data, type: MessageMediaType, duration: TimeInterval? = nil) async {
         let thumbnailData: Data?
 
         if type == .image {
@@ -127,7 +228,7 @@ final class ChatViewModel: ObservableObject {
         }
 
         await MainActor.run {
-            pendingMedia = PendingMedia(data: data, type: type, thumbnailData: thumbnailData, state: .ready)
+            pendingMedia = PendingMedia(data: data, type: type, thumbnailData: thumbnailData, state: .ready, duration: duration)
         }
     }
 
@@ -140,20 +241,20 @@ final class ChatViewModel: ObservableObject {
         pending.markUploading()
         await MainActor.run { self.pendingMedia = pending }
 
-        let request = MessageRequest.media(data: pending.data, mediaType: pending.type)
+        let request = MessageRequest.media(data: pending.data, mediaType: pending.type, duration: pending.duration)
         await send(request: request)
         await MainActor.run { self.pendingMedia = nil }
     }
 
     enum MessageRequest {
         case text(String)
-        case media(data: Data, mediaType: MessageMediaType)
+        case media(data: Data, mediaType: MessageMediaType, duration: TimeInterval?)
 
         var previewText: String {
             switch self {
             case let .text(text):
                 return text
-            case let .media(_, mediaType):
+            case let .media(_, mediaType, _):
                 return mediaType.previewText
             }
         }
@@ -201,11 +302,13 @@ final class ChatViewModel: ObservableObject {
         typingTimeoutWorkItem?.cancel()
         typingTimeoutWorkItem = nil
 
-        var optimisticContent = request.previewText
+        let optimisticContent = request.previewText
         var optimisticMediaURL: String? = nil
         var optimisticMediaType: MessageMediaType? = nil
+        var optimisticDuration: TimeInterval? = nil
 
-        if case let .media(data, mediaType) = request {
+        if case let .media(data, mediaType, duration) = request {
+            optimisticDuration = duration
             do {
                 let uploadedURL = try await uploadMedia(data: data, mediaType: mediaType, conversationID: conversation.id)
                 optimisticMediaURL = uploadedURL
@@ -231,6 +334,7 @@ final class ChatViewModel: ObservableObject {
             mediaURL: optimisticMediaURL,
             mediaType: optimisticMediaType
         )
+        optimisticMessage.voiceDuration = optimisticDuration
 
         modelContext.insert(optimisticMessage)
         messages.append(optimisticMessage)
@@ -256,6 +360,9 @@ final class ChatViewModel: ObservableObject {
         if let mediaURL = message.mediaURL {
             payload["mediaURL"] = mediaURL
             payload["mediaType"] = message.mediaType?.rawValue
+            if let duration = message.voiceDuration {
+                payload["voiceDuration"] = duration
+            }
         }
 
         return payload
@@ -473,7 +580,8 @@ final class ChatViewModel: ObservableObject {
                         showSenderName: showName,
                         showAvatar: showAvatar,
                         senderProfile: userProfiles[message.senderID],
-                        isCurrentUser: isCurrentUser
+                        isCurrentUser: isCurrentUser,
+                        showTranslation: translationVisibility[message.id] == true
                     )
                 )
             }
@@ -565,6 +673,49 @@ final class ChatViewModel: ObservableObject {
 #endif
     }
 
+    // Voice recording helpers
+    func startVoiceRecording() async {
+        do {
+            try await voiceService.startRecording()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func stopVoiceRecording() async -> Bool {
+        do {
+            let result = try await voiceService.stopRecording()
+            let data = try Data(contentsOf: result.url)
+            try? FileManager.default.removeItem(at: result.url)
+            await enqueuePendingMedia(data: data, type: .voice, duration: result.duration)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func cancelVoiceRecording() {
+        voiceService.cancelRecording()
+    }
+
+    func sendCurrentVoiceRecording() async {
+        await sendPendingMedia()
+    }
+
+    private func handleAutoStopRecording() async {
+        do {
+            let result = try await voiceService.stopRecording()
+            let data = try Data(contentsOf: result.url)
+            try? FileManager.default.removeItem(at: result.url)
+            await enqueuePendingMedia(data: data, type: .voice, duration: result.duration)
+        } catch {
+            await MainActor.run {
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     struct MessageDisplayItem: Identifiable {
         let id: String
         let message: MessageEntity
@@ -572,6 +723,7 @@ final class ChatViewModel: ObservableObject {
         let showAvatar: Bool
         let senderProfile: UserProfile?
         let isCurrentUser: Bool
+        let showTranslation: Bool
     }
 }
 

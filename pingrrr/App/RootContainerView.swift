@@ -44,6 +44,8 @@ final class AppServices: ObservableObject {
     let conversationService = ConversationService()
     let conversationNavigation = PassthroughSubject<String, Never>()
     let mediaService = MediaService()
+    let profileService = ProfileService()
+    let voiceMessageService = VoiceMessageService()
 
     private var modelContext: ModelContext?
     private var hasConfigured = false

@@ -3,6 +3,9 @@ import SwiftData
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(AVFoundation)
+@preconcurrency import AVFoundation
+#endif
 
 struct ChatView: View {
     @Environment(\.modelContext) private var modelContext
@@ -15,6 +18,7 @@ struct ChatView: View {
 
     @State private var showMediaSheet = false
     @State private var showMediaPreview = false
+    @State private var showVoiceWarning = false
 
     init(conversation: ConversationEntity, currentUserID: String, modelContext: ModelContext, appServices: AppServices) {
         self.conversation = conversation
@@ -41,115 +45,109 @@ struct ChatView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task { viewModel.start() }
         .onDisappear {
-            viewModel.userLeftChat()
-            viewModel.userStoppedTyping()
+            viewModel.stop()
         }
-        .onChange(of: viewModel.draftMessage) { _, _ in
-            if viewModel.draftMessage.isEmpty {
-                viewModel.userStoppedTyping()
+        .alert("Voice messages delete after 7 days", isPresented: $showVoiceWarning) {
+            Button("Got it", role: .cancel) {}
+        } message: {
+            Text("To save space, voice messages auto-delete 7 days after they are sent.")
+        }
+        .sheet(isPresented: $showMediaSheet) {
+            MediaPickerSheet { result in
+                switch result {
+                case let .image(data):
+                    Task {
+                        await viewModel.enqueuePendingMedia(data: data, type: .image)
+                        showMediaPreview = true
+                        showMediaSheet = false
+                    }
+                case .cancel:
+                    viewModel.clearPendingMedia()
+                    showMediaPreview = false
+                    showMediaSheet = false
+                }
+            }
+        }
+        .sheet(isPresented: $showMediaPreview) {
+            if let pending = viewModel.pendingMedia {
+                MediaSendPreview(
+                    pending: pending,
+                    viewModel: viewModel,
+                    onSend: {
+                        Task {
+                            await viewModel.sendPendingMedia()
+                            await MainActor.run { showMediaPreview = false }
+                        }
+                    },
+                    onCancel: {
+                        viewModel.clearPendingMedia()
+                        showMediaPreview = false
+                    }
+                )
+                .presentationDetents([.medium])
             } else {
-                viewModel.userStartedTyping()
+                Text("No media selected")
+                    .foregroundStyle(.secondary)
             }
         }
-        .onChange(of: inputFocused) { _, focused in
-            if focused {
-                Task { await viewModel.markMessagesAsRead() }
-            }
+        .onReceive(NotificationCenter.default.publisher(for: .voiceMessageDidRequireWarning)) { _ in
+            showVoiceWarning = true
         }
-        .onAppear {
-            viewModel.userStartedViewingChat()
-            Task { await viewModel.markMessagesAsRead() }
+        .onChange(of: viewModel.isVoiceRecording) { _, isRecording in
+            if isRecording {
+                inputFocused = false
+            }
         }
     }
 
     private var header: some View {
-        VStack(spacing: 6) {
-            HStack {
+        HStack {
+            VStack(alignment: .leading) {
                 Text(conversation.title ?? "Chat")
-                    .font(.title3.bold())
+                    .font(.headline)
                     .foregroundStyle(.white)
-
-                Spacer()
-
-                presenceIndicator
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-
-            Divider()
-                .overlay(Color.white.opacity(0.1))
-        }
-        .background(Color.black.opacity(0.95))
-    }
-
-    private var presenceIndicator: some View {
-        Group {
-            if let snapshot = viewModel.presenceSnapshot {
-                if snapshot.isOnline {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 8, height: 8)
-                        Text("Online")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                } else if let lastSeen = snapshot.lastSeen {
-                    Text("Last seen \(Formatter.relativeDateFormatter.localizedString(for: lastSeen, relativeTo: Date()))")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Offline")
-                        .font(.footnote)
+                if let snapshot = viewModel.presenceSnapshot {
+                    Text(snapshot.localizedDescription)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            } else {
-                Text("Connecting...")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
+            Spacer()
         }
+        .padding(.horizontal)
+        .padding(.vertical, 12)
+        .background(Color.black)
     }
 
     private var messagesList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: 8) {
                     ForEach(viewModel.displayItems) { item in
                         MessageRowView(
                             item: item,
                             viewModel: viewModel,
-                            onRetry: { Task { await viewModel.retrySendingMessage(item.message) } }
+                            onRetry: {
+                                Task { await viewModel.retrySendingMessage(item.message) }
+                            }
                         )
                         .id(item.id)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 16)
             }
             .background(Color.black)
-            .onAppear {
-                scrollToBottom(proxy: proxy, animated: false, delayed: true)
-            }
             .onChange(of: viewModel.displayItems.count) { _, _ in
-                scrollToBottom(proxy: proxy, animated: true, delayed: false)
-            }
-            .onChange(of: viewModel.displayItems.last?.id) { _, _ in
-                scrollToBottom(proxy: proxy, animated: true, delayed: false)
-                Task { await viewModel.markMessagesAsRead() }
+                scrollToBottom(proxy: proxy, delayed: true)
             }
         }
     }
 
-    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool, delayed: Bool) {
+    private func scrollToBottom(proxy: ScrollViewProxy, delayed: Bool) {
         guard let lastID = viewModel.displayItems.last?.id else { return }
-
         let executeScroll = {
-            if animated {
-                withAnimation(.easeOut(duration: 0.25)) {
-                    proxy.scrollTo(lastID, anchor: .bottom)
-                }
-            } else {
+            withAnimation(.easeOut) {
                 proxy.scrollTo(lastID, anchor: .bottom)
             }
         }
@@ -204,81 +202,77 @@ struct ChatView: View {
                 .padding(.horizontal, 16)
             }
 
-            HStack(spacing: 12) {
-                Button {
-                    showMediaSheet = true
-                } label: {
-                    Image(systemName: "plus.circle")
-                        .imageScale(.large)
-                        .foregroundStyle(.secondary)
-                }
-                .sheet(isPresented: $showMediaSheet) {
-                    MediaPickerSheet { result in
-                        switch result {
-                        case let .image(data):
-                            Task {
-                                await viewModel.enqueuePendingMedia(data: data, type: .image)
-                                showMediaPreview = true
-                                showMediaSheet = false
-                            }
-                        case let .voice(data):
-                            Task {
-                                await viewModel.enqueuePendingMedia(data: data, type: .voice)
-                                showMediaPreview = true
-                                showMediaSheet = false
-                            }
-                        case .cancel:
-                            viewModel.clearPendingMedia()
-                            showMediaPreview = false
-                            showMediaSheet = false
-                        }
-                    }
-                }
-        .sheet(isPresented: $showMediaPreview) {
-            if let pending = viewModel.pendingMedia {
-                MediaSendPreview(
-                    pending: pending,
-                    viewModel: viewModel,
+            if viewModel.isVoiceRecording {
+                VoiceRecordingBar(
+                    duration: viewModel.voiceRecordingDuration,
+                    onCancel: {
+                        viewModel.cancelVoiceRecording()
+                    },
                     onSend: {
                         Task {
-                            await viewModel.sendPendingMedia()
-                            await MainActor.run { showMediaPreview = false }
+                            if await viewModel.stopVoiceRecording() {
+                                await viewModel.sendCurrentVoiceRecording()
+                            }
                         }
-                    },
-                    onCancel: {
-                        viewModel.clearPendingMedia()
-                        showMediaPreview = false
                     }
                 )
-                .presentationDetents([.medium])
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
             } else {
-                Text("No media selected")
-                    .foregroundStyle(.secondary)
-            }
-        }
-
-                TextField("Message", text: $viewModel.draftMessage, axis: .vertical)
-                    .focused($inputFocused)
-                    .textFieldStyle(.plain)
-                    .foregroundStyle(.white)
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 12)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
-                    .lineLimit(1...4)
-
-                Button {
-                    Task {
-                        await viewModel.sendMessage()
+                HStack(spacing: 12) {
+                    Button {
+                        showMediaSheet = true
+                    } label: {
+                        Image(systemName: "plus.circle")
+                            .imageScale(.large)
+                            .foregroundStyle(.secondary)
                     }
-                } label: {
-                    Image(systemName: "paperplane.fill")
-                        .imageScale(.large)
-                        .foregroundStyle(viewModel.draftMessage.isEmpty ? .gray : .blue)
+
+                    Button {
+                        Task {
+                            await viewModel.toggleInlineTranslation()
+                        }
+                    } label: {
+                        Image(systemName: "globe")
+                            .imageScale(.medium)
+                            .foregroundStyle(viewModel.aiIsProcessingTranslation ? .blue : .secondary)
+                    }
+                    .disabled(viewModel.aiIsProcessingTranslation)
+
+                    TextField("Type a message...", text: $viewModel.draftMessage, axis: .vertical)
+                        .focused($inputFocused)
+                        .textFieldStyle(.plain)
+                        .foregroundStyle(.white)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 12)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+                        .lineLimit(1...4)
+
+                    Button {
+                        let trimmed = viewModel.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmed.isEmpty {
+                            Task {
+                                await viewModel.startVoiceRecording()
+                            }
+                        } else {
+                            Task {
+                                await viewModel.sendMessage()
+                                await MainActor.run {
+                                    inputFocused = false
+                                }
+                            }
+                        }
+                    } label: {
+                        let isTyping = !viewModel.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        Image(systemName: isTyping ? "paperplane.fill" : "mic.fill")
+                            .imageScale(.large)
+                            .foregroundStyle(isTyping ? .blue : .secondary)
+                    }
+                    .disabled(viewModel.isSending)
                 }
-                .disabled(viewModel.draftMessage.isEmpty)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
         }
         .background(.ultraThinMaterial)
     }
@@ -308,22 +302,21 @@ private struct MessageRowView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if let mediaType = item.message.mediaType, let mediaURL = item.message.mediaURL {
-                    MediaBubbleView(
-                        mediaType: mediaType,
-                        mediaURL: mediaURL,
-                        isCurrentUser: item.isCurrentUser,
-                        message: item.message,
-                        viewModel: viewModel
-                    )
-                } else {
-                    Text(item.message.content)
-                        .font(.body)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(bubbleBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                messageBubble
+
+                if let translated = item.message.translatedContent, item.showTranslation {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Translated")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(translated)
+                            .font(.body)
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 HStack(spacing: 6) {
@@ -337,9 +330,41 @@ private struct MessageRowView: View {
                 }
             }
             .frame(maxWidth: UIScreen.main.bounds.width * 0.72, alignment: item.isCurrentUser ? .trailing : .leading)
+            .contextMenu {
+                Button("Translate") {
+                    Task { await viewModel.toggleTranslation(for: item.id) }
+                }
+                if let translated = item.message.translatedContent {
+                    Button("Copy Translation") {
+                        UIPasteboard.general.string = translated
+                    }
+                }
+            }
 
             if !item.isCurrentUser {
                 Spacer(minLength: 40)
+            }
+        }
+    }
+
+    private var messageBubble: some View {
+        Group {
+            if let mediaType = item.message.mediaType, let mediaURL = item.message.mediaURL {
+                MediaBubbleView(
+                    mediaType: mediaType,
+                    mediaURL: mediaURL,
+                    isCurrentUser: item.isCurrentUser,
+                    message: item.message,
+                    viewModel: viewModel
+                )
+            } else {
+                Text(item.message.content)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(bubbleBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
     }
@@ -455,6 +480,63 @@ private struct MessageRowView: View {
     }
 }
 
+private struct PendingMediaBanner: View {
+    let pending: ChatViewModel.PendingMedia
+    let viewModel: ChatViewModel
+    let onRemove: () -> Void
+    let onTap: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if pending.type == .image, let thumbnail = viewModel.thumbnailImage(for: pending) {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                Image(systemName: pending.type == .voice ? "waveform" : "photo")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(Color.blue.opacity(0.3))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(pending.type.previewText)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+
+                if let duration = pending.duration, pending.type == .voice {
+                    Text(Formatter.format(duration: duration))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if pending.state == .uploading {
+                    Text("Uploading…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Tap to preview")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.white.opacity(0.8))
+                    .font(.title3)
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture(perform: onTap)
+    }
+}
+
 private struct MediaBubbleView: View {
     let mediaType: MessageMediaType
     let mediaURL: String
@@ -544,14 +626,57 @@ private struct MediaBubbleView: View {
     }
 }
 
+private struct VoiceRecordingBar: View {
+    let duration: TimeInterval
+    let onCancel: () -> Void
+    let onSend: () -> Void
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Button(action: onCancel) {
+                Image(systemName: "trash.fill")
+                    .font(.title3)
+                    .foregroundStyle(.red)
+                    .padding(8)
+                    .background(Circle().fill(Color.white.opacity(0.12)))
+            }
+
+            HStack(spacing: 12) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.white)
+                Text(Formatter.format(duration: duration))
+                    .font(.headline)
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: onSend) {
+                Image(systemName: "paperplane.fill")
+                    .font(.title3)
+                    .foregroundStyle(.white)
+                    .padding(12)
+                    .background(Circle().fill(Color.blue))
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(Color.blue.opacity(0.25))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
 private struct VoiceMessageBubble: View {
     let url: String
     let message: MessageEntity
     let viewModel: ChatViewModel
 
     @State private var isPlaying = false
-    @State private var playbackProgress: Double = 0
-    @State private var duration: TimeInterval = 0
+    @State private var isLoading = false
+    @State private var progress: Double = 0
+    @State private var player: AVAudioPlayer?
+    @State private var timer: Timer?
+    @State private var audioData: Data?
 
     var body: some View {
         HStack(spacing: 16) {
@@ -563,33 +688,89 @@ private struct VoiceMessageBubble: View {
                     .padding(12)
                     .background(Circle().fill(Color.blue))
             }
+            .disabled(isLoading)
 
             VStack(alignment: .leading, spacing: 8) {
-                ProgressView(value: playbackProgress)
+                ProgressView(value: progress)
                     .progressViewStyle(.linear)
                     .tint(.white)
 
-                Text(formatDuration(duration))
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.8))
+                HStack(spacing: 4) {
+                    Text(Formatter.format(duration: message.voiceDuration ?? player?.duration ?? 0))
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                    if isLoading {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .scaleEffect(0.6)
+                            .tint(.white)
+                    }
+                }
             }
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.white.opacity(0.08)))
-    }
-
-    private func togglePlayback() async {
-        // Placeholder: integrate actual playback service in future work
-        isPlaying.toggle()
-        if isPlaying {
-            duration = 30
+        .onDisappear {
+            stopPlayback()
         }
     }
 
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let minutes = Int(duration) / 60
-        let seconds = Int(duration) % 60
-        return String(format: "%d:%02d", minutes, seconds)
+    private func togglePlayback() async {
+        if isPlaying {
+            stopPlayback()
+            return
+        }
+
+        if player == nil {
+            await loadAudioIfNeeded()
+        }
+
+        guard let player else { return }
+
+        player.currentTime = 0
+        player.play()
+        progress = 0
+        isPlaying = true
+
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
+            if player.isPlaying {
+                progress = player.currentTime / player.duration
+            } else {
+                timer.invalidate()
+                stopPlayback()
+            }
+        }
+    }
+
+    private func stopPlayback() {
+        player?.stop()
+        player = nil
+        timer?.invalidate()
+        timer = nil
+        progress = 0
+        isPlaying = false
+    }
+
+    private func loadAudioIfNeeded() async {
+        if audioData != nil { return }
+
+        await MainActor.run { isLoading = true }
+
+        do {
+            let data = try await viewModel.loadMediaData(from: url, type: .voice)
+            audioData = data
+            let player = try AVAudioPlayer(data: data)
+            player.prepareToPlay()
+            await MainActor.run {
+                self.player = player
+                self.isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.isLoading = false
+            }
+        }
     }
 }
 
@@ -599,6 +780,12 @@ private enum Formatter {
         formatter.unitsStyle = .short
         return formatter
     }()
+
+    static func format(duration: TimeInterval) -> String {
+        guard duration.isFinite, duration > 0 else { return "0\"" }
+        let seconds = Int(round(duration))
+        return "\(seconds)\""
+    }
 }
 
 private struct ReadReceiptEntry: Identifiable {
@@ -643,13 +830,9 @@ private struct OverlappingStatusAvatars: View {
                 entry.avatar
                     .frame(width: 16, height: 16)
                     .clipShape(Circle())
-                    .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
-            }
-            if entries.count > 3 {
-                Text("+\(entries.count - 3)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 4)
+                    .overlay(
+                        Circle().stroke(Color.black, lineWidth: 1)
+                    )
             }
         }
     }
@@ -727,59 +910,6 @@ private struct MediaSendPreview: View {
         case .voice:
             return "Voice messages are limited to 30 seconds and auto-delete after 7 days."
         }
-    }
-}
-
-private struct PendingMediaBanner: View {
-    let pending: ChatViewModel.PendingMedia
-    let viewModel: ChatViewModel
-    let onRemove: () -> Void
-    let onTap: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            if pending.type == .image, let thumbnail = viewModel.thumbnailImage(for: pending) {
-                Image(uiImage: thumbnail)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 48, height: 48)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            } else {
-                Image(systemName: pending.type == .voice ? "waveform" : "photo")
-                    .font(.system(size: 24))
-                    .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
-                    .background(Color.blue.opacity(0.3))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(pending.type.previewText)
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.white)
-
-                if pending.state == .uploading {
-                    Text("Uploading…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Tap to preview")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.white.opacity(0.8))
-                    .font(.title3)
-            }
-        }
-        .padding(12)
-        .background(Color.white.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .onTapGesture(perform: onTap)
     }
 }
 

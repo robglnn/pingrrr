@@ -8,6 +8,18 @@ final class PresenceService: ObservableObject {
     struct Snapshot: Equatable {
         let isOnline: Bool
         let lastSeen: Date?
+
+        var localizedDescription: String {
+            if isOnline {
+                return "Online"
+            }
+
+            guard let lastSeen else { return "Offline" }
+
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .short
+            return "Last seen \(formatter.localizedString(for: lastSeen, relativeTo: Date()))"
+        }
     }
 
     private let db = Firestore.firestore()
