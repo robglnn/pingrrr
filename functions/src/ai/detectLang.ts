@@ -112,3 +112,4 @@ function parseDetectionResponse(responseText: string) {
 }
 
 
+
