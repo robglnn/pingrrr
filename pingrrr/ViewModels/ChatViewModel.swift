@@ -253,8 +253,6 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    private var aiInsights: [String: AIInsight] = [:]
-
     struct PendingMedia {
         enum State {
             case ready
