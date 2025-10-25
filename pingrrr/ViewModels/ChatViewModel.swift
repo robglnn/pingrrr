@@ -58,6 +58,7 @@ final class ChatViewModel: ObservableObject {
 
     private var translationCache: [String: String] = [:]
     private var translationVisibility: [String: Bool] = [:]
+    private var aiInsights: [String: AIInsight] = [:]
     private var aiProcessingFlag = false
 
     var aiIsProcessingTranslation: Bool {
@@ -167,6 +168,7 @@ final class ChatViewModel: ObservableObject {
         if translationVisibility[message.id] == true {
             translationVisibility[message.id] = false
             message.translatedContent = nil
+            aiInsights[message.id] = nil
             regroupMessages()
             return
         }
@@ -182,6 +184,7 @@ final class ChatViewModel: ObservableObject {
         if let cached = translationCache[message.id] {
             message.translatedContent = cached
             translationVisibility[message.id] = true
+            aiInsights[message.id] = AIInsight(type: .translation, content: cached)
             regroupMessages()
             return
         }
@@ -195,11 +198,62 @@ final class ChatViewModel: ObservableObject {
             translationCache[message.id] = translated
             message.translatedContent = translated
             translationVisibility[message.id] = true
+            aiInsights[message.id] = AIInsight(type: .translation, content: translated)
             regroupMessages()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
+
+    func explainSlang(for messageID: String?) async {
+        guard let messageID,
+              let message = messages.first(where: { $0.id == messageID }) else {
+            return
+        }
+
+        do {
+            let explanation = try await AIService.shared.explainSlang(text: message.content, language: aiPreferences.primaryLanguage)
+            await MainActor.run {
+                aiInsights[message.id] = AIInsight(type: .slang, content: explanation)
+            }
+        } catch {
+            await MainActor.run { self.errorMessage = error.localizedDescription }
+        }
+    }
+
+    func culturalHint(for messageID: String?) async {
+        guard let messageID,
+              let message = messages.first(where: { $0.id == messageID }) else {
+            return
+        }
+
+        do {
+            let hint = try await AIService.shared.culturalHint(text: message.content, language: aiPreferences.primaryLanguage, audienceCountry: aiPreferences.primaryLanguage)
+            await MainActor.run {
+                aiInsights[message.id] = AIInsight(type: .culture, content: hint)
+            }
+        } catch {
+            await MainActor.run { self.errorMessage = error.localizedDescription }
+        }
+    }
+
+    func adjustTone(for messageID: String?) async {
+        guard let messageID,
+              let message = messages.first(where: { $0.id == messageID }) else {
+            return
+        }
+
+        do {
+            let adjusted = try await AIService.shared.adjustTone(text: message.content, language: aiPreferences.primaryLanguage, formality: aiPreferences.defaultFormality)
+            await MainActor.run {
+                aiInsights[message.id] = AIInsight(type: .formality, content: adjusted)
+            }
+        } catch {
+            await MainActor.run { self.errorMessage = error.localizedDescription }
+        }
+    }
+
+    private var aiInsights: [String: AIInsight] = [:]
 
     struct PendingMedia {
         enum State {
@@ -574,15 +628,7 @@ final class ChatViewModel: ObservableObject {
                 }
 
                 newItems.append(
-                    MessageDisplayItem(
-                        id: message.id,
-                        message: message,
-                        showSenderName: showName,
-                        showAvatar: showAvatar,
-                        senderProfile: userProfiles[message.senderID],
-                        isCurrentUser: isCurrentUser,
-                        showTranslation: translationVisibility[message.id] == true
-                    )
+                    makeDisplayItem(for: message, showName: showName, showAvatar: showAvatar, isCurrentUser: isCurrentUser)
                 )
             }
 
@@ -724,6 +770,36 @@ final class ChatViewModel: ObservableObject {
         let senderProfile: UserProfile?
         let isCurrentUser: Bool
         let showTranslation: Bool
+        let insight: AIInsight?
+    }
+
+    private func makeDisplayItem(for message: MessageEntity, showName: Bool, showAvatar: Bool, isCurrentUser: Bool) -> MessageDisplayItem {
+        MessageDisplayItem(
+            id: message.id,
+            message: message,
+            showSenderName: showName,
+            showAvatar: showAvatar,
+            senderProfile: userProfiles[message.senderID],
+            isCurrentUser: isCurrentUser,
+            showTranslation: translationVisibility[message.id] == true,
+            insight: aiInsights[message.id]
+        )
+    }
+
+    private func aiInsight(for messageID: String) -> AIInsight? {
+        aiInsights[messageID]
+    }
+
+    struct AIInsight {
+        enum InsightType {
+            case slang
+            case culture
+            case formality
+            case translation
+        }
+
+        let type: InsightType
+        let content: String
     }
 }
 

@@ -1,0 +1,153 @@
+import * as admin from 'firebase-admin';
+import * as functions from 'firebase-functions';
+import { createOpenAI } from '@ai-sdk/openai';
+import { z } from 'zod';
+
+const DAILY_USAGE_LIMIT_FREE = 20;
+
+const openAiKey = process.env.OPENAI_API_KEY || functions.config()?.openai?.key;
+
+if (!openAiKey) {
+  functions.logger.warn('OPENAI_API_KEY is not set. AI features will be disabled.');
+}
+
+export const openAIClient = createOpenAI({
+  apiKey: openAiKey ?? '',
+});
+
+export const DEFAULT_MODEL = 'gpt-4.1-mini';
+
+const usageDocPath = (uid: string, dateKey: string) => `usage/${uid}_${dateKey}`;
+
+const getDateKey = (): string => {
+  const now = new Date();
+  return now.toISOString().split('T')[0];
+};
+
+export async function assertUsageAllowance(uid: string, increment = 1): Promise<void> {
+  if (!uid) {
+    throw new functions.https.HttpsError('invalid-argument', 'Missing user id for rate limiting.');
+  }
+
+  const dateKey = getDateKey();
+  const docRef = admin.firestore().doc(usageDocPath(uid, dateKey));
+  const snap = await docRef.get();
+  const data = snap.data() ?? { count: 0, tier: 'free' };
+
+  const tierLimit = resolveTierLimit(data?.tier ?? 'free');
+  const currentCount = data?.count ?? 0;
+
+  if (tierLimit >= 0 && currentCount + increment > tierLimit) {
+    throw new functions.https.HttpsError(
+      'resource-exhausted',
+      'Daily AI request limit reached. Upgrade to a higher tier for more requests.'
+    );
+  }
+
+  await docRef.set(
+    {
+      count: admin.firestore.FieldValue.increment(increment),
+      tier: data?.tier ?? 'free',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+function resolveTierLimit(tier: string): number {
+  switch (tier) {
+    case 'unlimited':
+      return -1;
+    case 'premium':
+      return 200;
+    case 'free':
+    default:
+      return DAILY_USAGE_LIMIT_FREE;
+  }
+}
+
+export async function recordAIHistory(params: {
+  uid: string;
+  sessionId: string;
+  type: string;
+  input: unknown;
+  output: unknown;
+  latencyMs: number;
+  tool: string;
+  tokens?: number;
+}): Promise<void> {
+  const { uid, sessionId, ...rest } = params;
+  if (!uid || !sessionId) return;
+
+  await admin
+    .firestore()
+    .collection('aiHistory')
+    .doc(uid)
+    .collection('sessions')
+    .doc(sessionId)
+    .collection('events')
+    .add({
+      ...rest,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+}
+
+export async function fetchConversationHistory(conversationId: string, limit = 10) {
+  const snapshot = await admin
+    .firestore()
+    .collection('conversations')
+    .doc(conversationId)
+    .collection('messages')
+    .orderBy('timestamp', 'desc')
+    .limit(limit)
+    .get();
+
+  const messages = snapshot.docs
+    .map((doc) => ({ id: doc.id, ...(doc.data() as Record<string, unknown>) }))
+    .reverse();
+
+  return messages;
+}
+
+export const ragRequestSchema = z.object({
+  conversationId: z.string(),
+  lastN: z.number().min(1).max(200).default(10),
+  uid: z.string(),
+  includeFullHistory: z.boolean().optional(),
+});
+
+export type RAGRequest = z.infer<typeof ragRequestSchema>;
+
+export async function buildConversationContext({
+  conversationId,
+  lastN,
+  includeFullHistory,
+}: RAGRequest): Promise<string> {
+  const limit = includeFullHistory ? 200 : lastN;
+  const messages = await fetchConversationHistory(conversationId, limit);
+
+  return messages
+    .map((entry) => {
+      const sender = entry.senderID ?? entry.senderId ?? entry.sender ?? 'Unknown';
+      const content = entry.content ?? entry.body ?? '';
+      return `${sender}: ${content}`;
+    })
+    .join('\n');
+}
+
+export function redactSensitiveData(text: string): string {
+  return text
+    .replace(/\b[\w.-]+@[\w.-]+\.[A-Za-z]{2,6}\b/g, '[email]')
+    .replace(/\b\+?\d[\d\s.-]{6,}\b/g, '[phone]');
+}
+
+export function buildSessionId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function ensureOpenAIKey(): void {
+  if (!openAiKey) {
+    throw new functions.https.HttpsError('failed-precondition', 'OpenAI API key is not configured.');
+  }
+}
+

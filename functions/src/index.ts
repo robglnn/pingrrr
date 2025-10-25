@@ -2,7 +2,7 @@ import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
 import { z } from 'zod';
 
-import { aiDetectLang, aiTranslate } from './ai';
+import { aiAdjustTone, aiCulturalHint, aiDetectLang, aiExplainSlang, aiSmartReplies, aiTranslate } from './ai';
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -143,5 +143,5 @@ export const onAuthUserCreate = functions
       );
   });
 
-export { aiTranslate, aiDetectLang };
+export { aiTranslate, aiDetectLang, aiCulturalHint, aiAdjustTone, aiExplainSlang, aiSmartReplies };
 
