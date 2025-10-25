@@ -19,8 +19,10 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
+const MAX_PARTICIPANTS = 5;
+
 const createConversationSchema = z.object({
-  participantEmails: z.array(z.string().email()).min(1),
+  participantEmails: z.array(z.string().email()).min(1).max(MAX_PARTICIPANTS - 1),
   title: z.string().max(120).optional(),
 });
 
@@ -72,6 +74,13 @@ export const createConversation = functions
 
       if (participants.size < 2) {
         throw new functions.https.HttpsError('failed-precondition', 'Add at least one other registered participant.');
+      }
+
+      if (participants.size > MAX_PARTICIPANTS) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          `Group chats can include up to ${MAX_PARTICIPANTS} participants including you.`
+        );
       }
 
       const participantList = Array.from(participants);

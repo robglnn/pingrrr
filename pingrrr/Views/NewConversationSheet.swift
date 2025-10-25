@@ -11,7 +11,7 @@ struct NewConversationSheet: View {
     @State private var isCreating = false
     @State private var errorMessage: String?
 
-    private let maxParticipants = 5
+    private let maxParticipants = 4
 
     init(appServices: AppServices, onDismiss: @escaping (ConversationCreationResponse?, String?, String) -> Void) {
         _appServices = ObservedObject(initialValue: appServices)
