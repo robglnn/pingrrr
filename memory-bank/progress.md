@@ -1,5 +1,16 @@
 # Progress – Pingrrr
 
+## Status Summary (Oct 25, 2025)
+- Voice messaging end-to-end functional with Firebase Storage uploads, lazy playback, and auto-delete warning.
+- Mic permission string added; in-app warning now persists per user across devices via Firestore flag.
+- Inline translations (AI integration) wired into chat UI with globe toggle, context menu, and caching.
+
+## Recent Highlights
+- Created dedicated `VoiceMessageService` managing recording, uploads, duration caps, and warning state.
+- Added `AIService` and `AIPreferencesService` for translation pipeline and per-user preferences.
+- Updated `ChatView` and `ChatViewModel` for mic/send toggle, translation UI, and voice flow.
+- Introduced notification extension helpers and permission strings in Info.plist.
+
 ## Status Summary (Oct 24, 2025)
 - Core messaging foundation in place with SwiftData + Firestore sync, presence, and notification pipeline.
 - Profile management and smart message display completed as part of MVP enhancements.
