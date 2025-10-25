@@ -168,7 +168,6 @@ final class ChatViewModel: ObservableObject {
         if translationVisibility[message.id] == true {
             translationVisibility[message.id] = false
             message.translatedContent = nil
-            aiInsights[message.id] = nil
             regroupMessages()
             return
         }
@@ -184,7 +183,6 @@ final class ChatViewModel: ObservableObject {
         if let cached = translationCache[message.id] {
             message.translatedContent = cached
             translationVisibility[message.id] = true
-            aiInsights[message.id] = AIInsight(type: .translation, content: cached)
             regroupMessages()
             return
         }
@@ -198,7 +196,6 @@ final class ChatViewModel: ObservableObject {
             translationCache[message.id] = translated
             message.translatedContent = translated
             translationVisibility[message.id] = true
-            aiInsights[message.id] = AIInsight(type: .translation, content: translated)
             regroupMessages()
         } catch {
             errorMessage = error.localizedDescription
@@ -212,12 +209,14 @@ final class ChatViewModel: ObservableObject {
         }
 
         do {
-            let explanation = try await AIService.shared.explainSlang(text: message.content, language: aiPreferences.primaryLanguage)
-            await MainActor.run {
-                aiInsights[message.id] = AIInsight(type: .slang, content: explanation)
-            }
+            let explanation = try await AIService.shared.explainSlang(
+                text: message.content,
+                language: aiPreferences.primaryLanguage
+            )
+            aiInsights[message.id] = AIInsight(type: .slang, content: explanation)
+            regroupMessages()
         } catch {
-            await MainActor.run { self.errorMessage = error.localizedDescription }
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -228,12 +227,15 @@ final class ChatViewModel: ObservableObject {
         }
 
         do {
-            let hint = try await AIService.shared.culturalHint(text: message.content, language: aiPreferences.primaryLanguage, audienceCountry: aiPreferences.primaryLanguage)
-            await MainActor.run {
-                aiInsights[message.id] = AIInsight(type: .culture, content: hint)
-            }
+            let hint = try await AIService.shared.culturalHint(
+                text: message.content,
+                language: aiPreferences.primaryLanguage,
+                audienceCountry: nil
+            )
+            aiInsights[message.id] = AIInsight(type: .culture, content: hint)
+            regroupMessages()
         } catch {
-            await MainActor.run { self.errorMessage = error.localizedDescription }
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -243,13 +245,18 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
+        let nextFormality: Formality = aiPreferences.defaultFormality == .formal ? .informal : .formal
+
         do {
-            let adjusted = try await AIService.shared.adjustTone(text: message.content, language: aiPreferences.primaryLanguage, formality: aiPreferences.defaultFormality)
-            await MainActor.run {
-                aiInsights[message.id] = AIInsight(type: .formality, content: adjusted)
-            }
+            let adjusted = try await AIService.shared.adjustTone(
+                text: message.content,
+                language: aiPreferences.primaryLanguage,
+                formality: nextFormality == .automatic ? .formal : nextFormality
+            )
+            aiInsights[message.id] = AIInsight(type: .formality, content: adjusted)
+            regroupMessages()
         } catch {
-            await MainActor.run { self.errorMessage = error.localizedDescription }
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -793,7 +800,6 @@ final class ChatViewModel: ObservableObject {
             case slang
             case culture
             case formality
-            case translation
         }
 
         let type: InsightType

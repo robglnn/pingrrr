@@ -5,6 +5,14 @@ import { z } from 'zod';
 
 const DAILY_USAGE_LIMIT_FREE = 20;
 
+interface ConversationMessageData {
+  senderID?: string;
+  senderId?: string;
+  sender?: string;
+  content?: string;
+  body?: string;
+}
+
 const openAiKey = process.env.OPENAI_API_KEY || functions.config()?.openai?.key;
 
 if (!openAiKey) {
@@ -103,7 +111,13 @@ export async function fetchConversationHistory(conversationId: string, limit = 1
     .get();
 
   const messages = snapshot.docs
-    .map((doc) => ({ id: doc.id, ...(doc.data() as Record<string, unknown>) }))
+    .map((doc) => {
+      const data = doc.data() as ConversationMessageData;
+      return {
+        id: doc.id,
+        ...data,
+      };
+    })
     .reverse();
 
   return messages;
@@ -128,8 +142,8 @@ export async function buildConversationContext({
 
   return messages
     .map((entry) => {
-      const sender = entry.senderID ?? entry.senderId ?? entry.sender ?? 'Unknown';
-      const content = entry.content ?? entry.body ?? '';
+      const sender = entry.senderID || entry.senderId || entry.sender || 'Unknown';
+      const content = entry.content || entry.body || '';
       return `${sender}: ${content}`;
     })
     .join('\n');

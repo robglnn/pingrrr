@@ -319,6 +319,10 @@ private struct MessageRowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                if let insight = item.insight {
+                    insightBubble(for: insight)
+                }
+
                 HStack(spacing: 6) {
                     Text(item.message.timestamp, style: .time)
                         .font(.caption2)
@@ -374,6 +378,58 @@ private struct MessageRowView: View {
             return AnyShapeStyle(Color.blue.opacity(0.9))
         } else {
             return AnyShapeStyle(Color.white.opacity(0.08))
+        }
+    }
+
+    @ViewBuilder
+    private func insightBubble(for insight: ChatViewModel.AIInsight) -> some View {
+        let (icon, tint) = insightAppearance(for: insight.type)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.caption)
+                    .foregroundStyle(tint)
+                Text(insightTitle(for: insight.type))
+                    .font(.caption2)
+                    .foregroundStyle(tint)
+                Spacer()
+                Button {
+                    UIPasteboard.general.string = insight.content
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text(insight.content)
+                .font(.footnote)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func insightAppearance(for type: ChatViewModel.AIInsight.InsightType) -> (icon: String, tint: Color) {
+        switch type {
+        case .slang:
+            return ("quote.bubble", .orange)
+        case .culture:
+            return ("globe.asia.australia", .purple)
+        case .formality:
+            return ("person.2.fill", .cyan)
+        }
+    }
+
+    private func insightTitle(for type: ChatViewModel.AIInsight.InsightType) -> String {
+        switch type {
+        case .slang:
+            return "Slang Explained"
+        case .culture:
+            return "Cultural Context"
+        case .formality:
+            return "Tone Suggestion"
         }
     }
 

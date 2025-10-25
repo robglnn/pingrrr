@@ -19,6 +19,7 @@ const adjustToneSchema = z.object({
 });
 
 export const aiAdjustTone = functions
+  .runWith({ secrets: ['OPENAI_API_KEY'] })
   .region('us-central1')
   .https.onCall(async (data, context) => {
     ensureOpenAIKey();
