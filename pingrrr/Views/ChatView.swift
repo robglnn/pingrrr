@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct ChatView: View {
     @Environment(\.modelContext) private var modelContext
@@ -11,7 +14,7 @@ struct ChatView: View {
     private let currentUserID: String
 
     @State private var showMediaSheet = false
-    @State private var showMediaSheet = false
+    @State private var showMediaPreview = false
 
     init(conversation: ConversationEntity, currentUserID: String, modelContext: ModelContext, appServices: AppServices) {
         self.conversation = conversation
@@ -183,6 +186,24 @@ struct ChatView: View {
             Divider()
                 .overlay(Color.white.opacity(0.1))
 
+            if let pending = viewModel.pendingMedia {
+                PendingMediaBanner(
+                    pending: pending,
+                    viewModel: viewModel,
+                    onRemove: {
+                        withAnimation {
+                            viewModel.clearPendingMedia()
+                            showMediaPreview = false
+                        }
+                    },
+                    onTap: {
+                        withAnimation { showMediaPreview = true }
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .padding(.horizontal, 16)
+            }
+
             HStack(spacing: 12) {
                 Button {
                     showMediaSheet = true
@@ -195,14 +216,46 @@ struct ChatView: View {
                     MediaPickerSheet { result in
                         switch result {
                         case let .image(data):
-                            Task { await viewModel.sendImage(data: data) }
+                            Task {
+                                await viewModel.enqueuePendingMedia(data: data, type: .image)
+                                showMediaPreview = true
+                                showMediaSheet = false
+                            }
                         case let .voice(data):
-                            Task { await viewModel.sendVoice(data: data) }
+                            Task {
+                                await viewModel.enqueuePendingMedia(data: data, type: .voice)
+                                showMediaPreview = true
+                                showMediaSheet = false
+                            }
                         case .cancel:
-                            break
+                            viewModel.clearPendingMedia()
+                            showMediaPreview = false
+                            showMediaSheet = false
                         }
                     }
                 }
+        .sheet(isPresented: $showMediaPreview) {
+            if let pending = viewModel.pendingMedia {
+                MediaSendPreview(
+                    pending: pending,
+                    viewModel: viewModel,
+                    onSend: {
+                        Task {
+                            await viewModel.sendPendingMedia()
+                            await MainActor.run { showMediaPreview = false }
+                        }
+                    },
+                    onCancel: {
+                        viewModel.clearPendingMedia()
+                        showMediaPreview = false
+                    }
+                )
+                .presentationDetents([.medium])
+            } else {
+                Text("No media selected")
+                    .foregroundStyle(.secondary)
+            }
+        }
 
                 TextField("Message", text: $viewModel.draftMessage, axis: .vertical)
                     .focused($inputFocused)
@@ -255,13 +308,23 @@ private struct MessageRowView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text(item.message.content)
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(bubbleBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                if let mediaType = item.message.mediaType, let mediaURL = item.message.mediaURL {
+                    MediaBubbleView(
+                        mediaType: mediaType,
+                        mediaURL: mediaURL,
+                        isCurrentUser: item.isCurrentUser,
+                        message: item.message,
+                        viewModel: viewModel
+                    )
+                } else {
+                    Text(item.message.content)
+                        .font(.body)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(bubbleBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
 
                 HStack(spacing: 6) {
                     Text(item.message.timestamp, style: .time)
@@ -392,6 +455,144 @@ private struct MessageRowView: View {
     }
 }
 
+private struct MediaBubbleView: View {
+    let mediaType: MessageMediaType
+    let mediaURL: String
+    let isCurrentUser: Bool
+    let message: MessageEntity
+    let viewModel: ChatViewModel
+
+    @State private var image: UIImage?
+    @State private var isLoading = false
+    @State private var loadError: String?
+
+    var body: some View {
+        Group {
+            switch mediaType {
+            case .image:
+                mediaImage
+            case .voice:
+                VoiceMessageBubble(url: mediaURL, message: message, viewModel: viewModel)
+            }
+        }
+    }
+
+    private var mediaImage: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(isCurrentUser ? Color.blue.opacity(0.9) : Color.white.opacity(0.08))
+
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            } else if isLoading {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white)
+            } else {
+                VStack(spacing: 6) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.white.opacity(0.8))
+                    if let loadError {
+                        Text(loadError)
+                            .font(.caption)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.white.opacity(0.8))
+                    } else {
+                        Text("Tap to load photo")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .frame(width: 220, height: 160)
+        .clipped()
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .onTapGesture { Task { await loadImage() } }
+        .task { await loadImageIfNeeded() }
+    }
+
+    private func loadImageIfNeeded() async {
+        guard image == nil, !isLoading else { return }
+        await loadImage()
+    }
+
+    private func loadImage() async {
+        guard image == nil else { return }
+        await MainActor.run {
+            loadError = nil
+            isLoading = true
+        }
+
+        do {
+            let data = try await viewModel.loadMediaData(from: mediaURL, type: mediaType)
+            if let fetchedImage = UIImage(data: data) {
+                await MainActor.run { self.image = fetchedImage }
+            } else {
+                await MainActor.run { self.loadError = "Unsupported image data" }
+            }
+        } catch {
+            await MainActor.run { self.loadError = error.localizedDescription }
+        }
+
+        await MainActor.run { self.isLoading = false }
+    }
+}
+
+private struct VoiceMessageBubble: View {
+    let url: String
+    let message: MessageEntity
+    let viewModel: ChatViewModel
+
+    @State private var isPlaying = false
+    @State private var playbackProgress: Double = 0
+    @State private var duration: TimeInterval = 0
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Button {
+                Task { await togglePlayback() }
+            } label: {
+                Image(systemName: isPlaying ? "stop.fill" : "play.fill")
+                    .foregroundStyle(.white)
+                    .padding(12)
+                    .background(Circle().fill(Color.blue))
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                ProgressView(value: playbackProgress)
+                    .progressViewStyle(.linear)
+                    .tint(.white)
+
+                Text(formatDuration(duration))
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.white.opacity(0.08)))
+    }
+
+    private func togglePlayback() async {
+        // Placeholder: integrate actual playback service in future work
+        isPlaying.toggle()
+        if isPlaying {
+            duration = 30
+        }
+    }
+
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
 private enum Formatter {
     static let relativeDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -453,3 +654,132 @@ private struct OverlappingStatusAvatars: View {
         }
     }
 }
+
+private struct MediaSendPreview: View {
+    let pending: ChatViewModel.PendingMedia
+    let viewModel: ChatViewModel
+    let onSend: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Group {
+                switch pending.type {
+                case .image:
+                    if let image = viewModel.thumbnailImage(for: pending) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 320)
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    } else {
+                        placeholder(icon: "photo", text: "Photo ready to send")
+                    }
+
+                case .voice:
+                    placeholder(icon: "waveform.circle.fill", text: "Voice message ready to send")
+                }
+            }
+
+            Text(description)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 16) {
+                Button(role: .destructive, action: onCancel) {
+                    Label("Cancel", systemImage: "xmark")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button(action: onSend) {
+                    Label("Send", systemImage: "paperplane.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+    }
+
+    private func placeholder(icon: String, text: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 60, weight: .regular))
+                .foregroundStyle(.blue)
+
+            Text(text)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.blue.opacity(0.12))
+        )
+    }
+
+    private var description: String {
+        switch pending.type {
+        case .image:
+            return "Double-check the preview before sending."
+        case .voice:
+            return "Voice messages are limited to 30 seconds and auto-delete after 7 days."
+        }
+    }
+}
+
+private struct PendingMediaBanner: View {
+    let pending: ChatViewModel.PendingMedia
+    let viewModel: ChatViewModel
+    let onRemove: () -> Void
+    let onTap: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if pending.type == .image, let thumbnail = viewModel.thumbnailImage(for: pending) {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                Image(systemName: pending.type == .voice ? "waveform" : "photo")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(Color.blue.opacity(0.3))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(pending.type.previewText)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+
+                if pending.state == .uploading {
+                    Text("Uploading…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Tap to preview")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.white.opacity(0.8))
+                    .font(.title3)
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture(perform: onTap)
+    }
+}
+

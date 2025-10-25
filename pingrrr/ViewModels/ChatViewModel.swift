@@ -2,6 +2,9 @@ import Foundation
 import Combine
 import SwiftData
 import FirebaseFirestore
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @MainActor
 final class ChatViewModel: ObservableObject {
@@ -34,6 +37,7 @@ final class ChatViewModel: ObservableObject {
         appServices.presenceService
     }
     @Published private(set) var presenceSnapshot: PresenceService.Snapshot?
+    @Published private(set) var pendingMedia: PendingMedia?
 
     init(
         conversation: ConversationEntity,
@@ -97,14 +101,48 @@ final class ChatViewModel: ObservableObject {
         draftMessage = ""
     }
 
-    func sendImage(data: Data) async {
-        let request = MessageRequest.media(data: data, mediaType: .image)
-        await send(request: request)
+    struct PendingMedia {
+        enum State {
+            case ready
+            case uploading
+        }
+
+        var data: Data
+        var type: MessageMediaType
+        var thumbnailData: Data?
+        var state: State
+
+        mutating func markUploading() {
+            state = .uploading
+        }
     }
 
-    func sendVoice(data: Data) async {
-        let request = MessageRequest.media(data: data, mediaType: .voice)
+    func enqueuePendingMedia(data: Data, type: MessageMediaType) async {
+        let thumbnailData: Data?
+
+        if type == .image {
+            thumbnailData = data
+        } else {
+            thumbnailData = nil
+        }
+
+        await MainActor.run {
+            pendingMedia = PendingMedia(data: data, type: type, thumbnailData: thumbnailData, state: .ready)
+        }
+    }
+
+    func clearPendingMedia() {
+        pendingMedia = nil
+    }
+
+    func sendPendingMedia() async {
+        guard var pending = pendingMedia else { return }
+        pending.markUploading()
+        await MainActor.run { self.pendingMedia = pending }
+
+        let request = MessageRequest.media(data: pending.data, mediaType: pending.type)
         await send(request: request)
+        await MainActor.run { self.pendingMedia = nil }
     }
 
     enum MessageRequest {
@@ -512,6 +550,19 @@ final class ChatViewModel: ObservableObject {
             }
         }
         readReceiptProfiles = map
+    }
+
+    func loadMediaData(from urlString: String, type: MessageMediaType) async throws -> Data {
+        try await appServices.mediaService.downloadMedia(at: urlString, type: type)
+    }
+
+    func thumbnailImage(for pending: PendingMedia) -> UIImage? {
+#if canImport(UIKit)
+        guard pending.type == .image, let data = pending.thumbnailData else { return nil }
+        return UIImage(data: data)
+#else
+        return nil
+#endif
     }
 
     struct MessageDisplayItem: Identifiable {

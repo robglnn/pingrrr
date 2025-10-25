@@ -9,9 +9,11 @@ struct MediaPickerSheet: View {
     }
 
     var onResult: (Result) -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var photoItems: [PhotosPickerItem] = []
-    @State private var isRecordingVoice = false
-    @State private var voiceData: Data?
+    @State private var selectedImageData: Data?
+
+    @State private var isPresentingPreview = false
 
     var body: some View {
         NavigationStack {
@@ -54,6 +56,46 @@ struct MediaPickerSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onResult(.cancel) }
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Send") {
+                        if let data = selectedImageData {
+                            onResult(.image(data))
+                        } else {
+                            onResult(.cancel)
+                        }
+                    }
+                    .disabled(selectedImageData == nil)
+                }
+            }
+            .sheet(isPresented: $isPresentingPreview) {
+                NavigationStack {
+                    VStack {
+                        if let data = selectedImageData, let image = UIImage(data: data) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .padding()
+                        } else {
+                            Text("No Preview Available")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+                    }
+                    .navigationTitle("Preview")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Back") { isPresentingPreview = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Send") {
+                                if let data = selectedImageData {
+                                    onResult(.image(data))
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -63,7 +105,10 @@ struct MediaPickerSheet: View {
             onResult(.cancel)
             return
         }
-        onResult(.image(data))
+        await MainActor.run {
+            selectedImageData = data
+            isPresentingPreview = true
+        }
     }
 }
 

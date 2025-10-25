@@ -241,6 +241,11 @@ final class MessageEntity {
         }
     }
 
+    var mediaURLValue: URL? {
+        guard let mediaURL else { return nil }
+        return URL(string: mediaURL)
+    }
+
     static func encodeIDs(_ ids: [String]) -> String {
         guard let data = try? JSONEncoder().encode(ids),
               let string = String(data: data, encoding: .utf8) else {

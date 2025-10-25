@@ -111,6 +111,7 @@ final class MessageSyncService {
         if let existing = try? context.fetch(descriptor).first {
             entity = existing
         } else {
+            let mediaType = record.mediaType.flatMap(MessageMediaType.init(rawValue:))
             entity = MessageEntity(
                 id: identifier,
                 conversationID: record.conversationID ?? conversationID ?? "",
@@ -124,7 +125,7 @@ final class MessageSyncService {
                 retryCount: 0,
                 nextRetryTimestamp: nil,
                 mediaURL: record.mediaURL,
-                mediaType: record.mediaType
+                mediaType: mediaType
             )
             context.insert(entity)
         }
@@ -143,8 +144,10 @@ final class MessageSyncService {
 
         entity.translatedContent = record.translatedContent
         entity.mediaURL = record.mediaURL
-        if let mediaType = record.mediaType {
+        if let mediaType = record.mediaType.flatMap(MessageMediaType.init(rawValue:)) {
             entity.mediaType = mediaType
+        } else {
+            entity.mediaType = nil
         }
 
         if let timestamp = record.timestamp {
@@ -192,7 +195,7 @@ final class MessageSyncService {
 
         guard let conversation = try? context.fetch(descriptor).first else { return }
 
-        if let mediaType = record.mediaType {
+        if let mediaType = record.mediaType.flatMap(MessageMediaType.init(rawValue:)) {
             conversation.lastMessagePreview = mediaType.previewText
         } else if let content = record.content {
             conversation.lastMessagePreview = content
@@ -312,6 +315,7 @@ final class MessageSyncService {
         }
 
         try? context.save()
+    }
 }
 
 private struct MessageRecord: Codable {
@@ -325,7 +329,7 @@ private struct MessageRecord: Codable {
     var readBy: [String]?
     var unreadCounts: [String: Int]?
     var mediaURL: String?
-    var mediaTypeRawValue: String?
+    var mediaType: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -364,13 +368,6 @@ private struct MessageRecord: Codable {
         self.readBy = readBy
         self.unreadCounts = unreadCounts
         self.mediaURL = mediaURL
-        self.mediaTypeRawValue = mediaType?.rawValue
-    }
-
-    var mediaType: MessageMediaType? {
-        get {
-            guard let mediaTypeRawValue else { return nil }
-            return MessageMediaType(rawValue: mediaTypeRawValue)
-        }
+        self.mediaType = mediaType?.rawValue
     }
 }
