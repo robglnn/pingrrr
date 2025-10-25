@@ -38,15 +38,10 @@ struct ChatView: View {
             inputBar
         }
         .background(Color.black.ignoresSafeArea())
-        .navigationTitle("")
+        .navigationTitle(conversation.title ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.black, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                toolbarTitle
-            }
-        }
         .task { viewModel.start() }
         .onDisappear {
             viewModel.stop()
@@ -108,6 +103,9 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
+                    if let snapshot = viewModel.presenceSnapshot {
+                        PresenceHeaderView(snapshot: snapshot)
+                    }
                     ForEach(viewModel.displayItems) { item in
                         MessageRowView(
                             item: item,
@@ -120,7 +118,7 @@ struct ChatView: View {
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 16)
+                .padding(.vertical, 12)
             }
             .background(Color.black)
             .onChange(of: viewModel.displayItems.count) { _, _ in
@@ -263,16 +261,18 @@ struct ChatView: View {
         .background(.ultraThinMaterial)
     }
 
-    private var toolbarTitle: some View {
-        VStack(spacing: 2) {
-            Text(conversation.title ?? "Chat")
-                .font(.headline)
-                .foregroundStyle(.white)
-            if let snapshot = viewModel.presenceSnapshot {
+    private struct PresenceHeaderView: View {
+        let snapshot: PresenceService.Snapshot
+
+        var body: some View {
+            HStack {
                 Text(snapshot.localizedDescription)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                Spacer()
             }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 4)
         }
     }
 }

@@ -224,9 +224,6 @@ private struct AIAssistantRow: View {
                 Text("Pingrrr Assistant")
                     .font(.headline)
                     .foregroundStyle(.white)
-                Text("Ask questions, translate chats, get summaries")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
             }
 
             Spacer()
