@@ -338,6 +338,20 @@ private struct MessageRowView: View {
                 Button("Translate") {
                     Task { await viewModel.toggleTranslation(for: item.id) }
                 }
+                Button("Explain Slang") {
+                    Task { await viewModel.explainSlang(for: item.id) }
+                }
+                Button("Cultural Hint") {
+                    Task { await viewModel.culturalHint(for: item.id) }
+                }
+                Button("Adjust Tone") {
+                    Task { await viewModel.adjustTone(for: item.id) }
+                }
+                if item.insight != nil {
+                    Button("Remove Insight") {
+                        viewModel.removeInsight(for: item.id)
+                    }
+                }
                 if let translated = item.message.translatedContent {
                     Button("Copy Translation") {
                         UIPasteboard.general.string = translated
@@ -369,6 +383,14 @@ private struct MessageRowView: View {
                     .padding(.vertical, 10)
                     .background(bubbleBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if item.isProcessing {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(0.6)
+                    .padding(6)
             }
         }
     }
@@ -414,22 +436,22 @@ private struct MessageRowView: View {
     private func insightAppearance(for type: ChatViewModel.AIInsight.InsightType) -> (icon: String, tint: Color) {
         switch type {
         case .slang:
-            return ("quote.bubble", .orange)
+            return ("bubble.left.and.exclamationmark.bubble.right", .orange)
         case .culture:
-            return ("globe.asia.australia", .purple)
+            return ("globe", .purple)
         case .formality:
-            return ("person.2.fill", .cyan)
+            return ("textformat.size.larger", .cyan)
         }
     }
 
     private func insightTitle(for type: ChatViewModel.AIInsight.InsightType) -> String {
         switch type {
         case .slang:
-            return "Slang Explained"
+            return "Slang Clarified"
         case .culture:
-            return "Cultural Context"
+            return "Cultural Tip"
         case .formality:
-            return "Tone Suggestion"
+            return "Tone Adjustment"
         }
     }
 

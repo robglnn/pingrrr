@@ -59,6 +59,7 @@ final class ChatViewModel: ObservableObject {
     private var translationCache: [String: String] = [:]
     private var translationVisibility: [String: Bool] = [:]
     private var aiInsights: [String: AIInsight] = [:]
+    private var aiBusyMessageIDs: Set<String> = []
     private var aiProcessingFlag = false
 
     var aiIsProcessingTranslation: Bool {
@@ -208,6 +209,9 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
+        await markBusy(true, for: messageID)
+        defer { Task { await self.markBusy(false, for: messageID) } }
+
         do {
             let explanation = try await AIService.shared.explainSlang(
                 text: message.content,
@@ -225,6 +229,9 @@ final class ChatViewModel: ObservableObject {
               let message = messages.first(where: { $0.id == messageID }) else {
             return
         }
+
+        await markBusy(true, for: messageID)
+        defer { Task { await self.markBusy(false, for: messageID) } }
 
         do {
             let hint = try await AIService.shared.culturalHint(
@@ -245,19 +252,32 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        let nextFormality: Formality = aiPreferences.defaultFormality == .formal ? .informal : .formal
+        await markBusy(true, for: messageID)
+        defer { Task { await self.markBusy(false, for: messageID) } }
+
+        let preferredFormality = aiPreferences.defaultFormality == .automatic ? .formal : aiPreferences.defaultFormality
 
         do {
             let adjusted = try await AIService.shared.adjustTone(
                 text: message.content,
                 language: aiPreferences.primaryLanguage,
-                formality: nextFormality == .automatic ? .formal : nextFormality
+                formality: preferredFormality
             )
             aiInsights[message.id] = AIInsight(type: .formality, content: adjusted)
             regroupMessages()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func removeInsight(for messageID: String?) {
+        guard let messageID else { return }
+        aiInsights[messageID] = nil
+        regroupMessages()
+    }
+
+    func isAIRequestInFlight(for messageID: String) -> Bool {
+        aiBusyMessageIDs.contains(messageID)
     }
 
     struct PendingMedia {
@@ -776,6 +796,7 @@ final class ChatViewModel: ObservableObject {
         let isCurrentUser: Bool
         let showTranslation: Bool
         let insight: AIInsight?
+        let isProcessing: Bool
     }
 
     private func makeDisplayItem(for message: MessageEntity, showName: Bool, showAvatar: Bool, isCurrentUser: Bool) -> MessageDisplayItem {
@@ -787,7 +808,8 @@ final class ChatViewModel: ObservableObject {
             senderProfile: userProfiles[message.senderID],
             isCurrentUser: isCurrentUser,
             showTranslation: translationVisibility[message.id] == true,
-            insight: aiInsights[message.id]
+            insight: aiInsights[message.id],
+            isProcessing: aiBusyMessageIDs.contains(message.id)
         )
     }
 
@@ -804,6 +826,18 @@ final class ChatViewModel: ObservableObject {
 
         let type: InsightType
         let content: String
+    }
+
+    private func markBusy(_ busy: Bool, for messageID: String) async {
+        await MainActor.run {
+            if busy {
+                aiBusyMessageIDs.insert(messageID)
+                aiInsights[messageID] = nil
+            } else {
+                aiBusyMessageIDs.remove(messageID)
+            }
+            regroupMessages()
+        }
     }
 }
 
