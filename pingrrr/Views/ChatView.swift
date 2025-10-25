@@ -33,16 +33,20 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             messagesList
             typingIndicator
             inputBar
         }
         .background(Color.black.ignoresSafeArea())
-        .navigationTitle(conversation.title ?? "Chat")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.black, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                toolbarTitle
+            }
+        }
         .task { viewModel.start() }
         .onDisappear {
             viewModel.stop()
@@ -100,25 +104,6 @@ struct ChatView: View {
         }
     }
 
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(conversation.title ?? "Chat")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                if let snapshot = viewModel.presenceSnapshot {
-                    Text(snapshot.localizedDescription)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 12)
-        .background(Color.black)
-    }
-
     private var messagesList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -142,6 +127,7 @@ struct ChatView: View {
                 scrollToBottom(proxy: proxy, delayed: true)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy, delayed: Bool) {
@@ -275,6 +261,19 @@ struct ChatView: View {
             }
         }
         .background(.ultraThinMaterial)
+    }
+
+    private var toolbarTitle: some View {
+        VStack(spacing: 2) {
+            Text(conversation.title ?? "Chat")
+                .font(.headline)
+                .foregroundStyle(.white)
+            if let snapshot = viewModel.presenceSnapshot {
+                Text(snapshot.localizedDescription)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

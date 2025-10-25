@@ -9,6 +9,7 @@ interface ConversationMessageData {
   senderID?: string;
   senderId?: string;
   sender?: string;
+  senderDisplayName?: string;
   content?: string;
   body?: string;
 }
@@ -140,13 +141,51 @@ export async function buildConversationContext({
   const limit = includeFullHistory ? 200 : lastN;
   const messages = await fetchConversationHistory(conversationId, limit);
 
+  const senderIDs = Array.from(
+    new Set(
+      messages
+        .map((entry) => entry.senderID || entry.senderId)
+        .filter((value): value is string => !!value)
+    )
+  );
+
+  const displayNameMap = await fetchDisplayNames(senderIDs);
+
   return messages
     .map((entry) => {
-      const sender = entry.senderID || entry.senderId || entry.sender || 'Unknown';
+      const rawSender = entry.senderID || entry.senderId || entry.sender || 'Unknown';
+      const prettySender =
+        entry.senderDisplayName || displayNameMap.get(rawSender) || rawSender;
       const content = entry.content || entry.body || '';
-      return `${sender}: ${content}`;
+      return `${prettySender}: ${content}`;
     })
     .join('\n');
+}
+
+async function fetchDisplayNames(userIDs: string[]): Promise<Map<string, string>> {
+  const results = new Map<string, string>();
+  if (userIDs.length === 0) {
+    return results;
+  }
+
+  const chunkSize = 10;
+  for (let index = 0; index < userIDs.length; index += chunkSize) {
+    const chunk = userIDs.slice(index, index + chunkSize);
+    const snapshot = await admin
+      .firestore()
+      .collection('users')
+      .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+      .get();
+
+    snapshot.docs.forEach((doc) => {
+      const displayName = doc.get('displayName') as string | undefined;
+      if (displayName) {
+        results.set(doc.id, displayName);
+      }
+    });
+  }
+
+  return results;
 }
 
 export function redactSensitiveData(text: string): string {

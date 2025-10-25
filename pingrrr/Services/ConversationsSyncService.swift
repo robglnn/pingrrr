@@ -89,11 +89,24 @@ final class ConversationsSyncService {
         let existing = try modelContext.fetch(FetchDescriptor<ConversationEntity>())
         var existingMap = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
 
+        let hiddenDescriptor = FetchDescriptor<ConversationPreferenceEntity>(
+            predicate: #Predicate { $0.isHidden }
+        )
+        let hiddenPreferences = (try? modelContext.fetch(hiddenDescriptor)) ?? []
+        let hiddenConversationIDs = Set(hiddenPreferences.map { $0.conversationID })
+
         for change in changes {
             switch change.type {
             case .added, .modified:
                 let record = try change.document.data(as: ConversationRecord.self)
                 let identifier = change.document.documentID
+                if hiddenConversationIDs.contains(identifier) {
+                    if let entity = existingMap[identifier] {
+                        modelContext.delete(entity)
+                        existingMap.removeValue(forKey: identifier)
+                    }
+                    continue
+                }
                 if record.hiddenForUserIDs.contains(currentUserID) {
                     continue
                 }
@@ -145,9 +158,22 @@ final class ConversationsSyncService {
         var existingMap = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
         var seenIdentifiers: Set<String> = []
 
+        let hiddenDescriptor = FetchDescriptor<ConversationPreferenceEntity>(
+            predicate: #Predicate { $0.isHidden }
+        )
+        let hiddenPreferences = (try? modelContext.fetch(hiddenDescriptor)) ?? []
+        let hiddenConversationIDs = Set(hiddenPreferences.map { $0.conversationID })
+
         for document in documents {
             let record = try document.data(as: ConversationRecord.self)
             let identifier = document.documentID
+            if hiddenConversationIDs.contains(identifier) {
+                if let entity = existingMap[identifier] {
+                    modelContext.delete(entity)
+                    existingMap.removeValue(forKey: identifier)
+                }
+                continue
+            }
             if record.hiddenForUserIDs.contains(currentUserID) {
                 continue
             }

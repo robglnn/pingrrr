@@ -138,7 +138,7 @@ struct ConversationsView: View {
         .alert("Delete chat?", isPresented: $isShowingDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 if let conversation = pendingDeletion {
-                    viewModel.delete(conversation: conversation)
+                    Task { await deleteConversationLocally(conversation) }
                 }
             }
             Button("Cancel", role: .cancel) {
@@ -234,6 +234,120 @@ private struct AIAssistantRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 8)
+    }
+}
+
+private struct ConversationRow: View {
+    let conversation: ConversationEntity
+    let presence: ConversationsViewModel.PresenceViewData
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            avatar
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+
+                    if presence.isOnline {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 10, height: 10)
+                    } else if let lastSeen = presence.lastSeen {
+                        Text("Last seen \(Formatter.relativeDateFormatter.localizedString(for: lastSeen, relativeTo: Date()))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if let timestamp = conversation.lastMessageTimestamp {
+                        Text(Formatter.relativeDateFormatter.localizedString(for: timestamp, relativeTo: Date()))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(conversation.lastMessagePreview ?? "No messages yet")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            if conversation.unreadCount > 0 {
+                badge(count: conversation.unreadCount)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    private var title: String {
+        conversation.title ?? "Chat"
+    }
+
+    private var avatar: some View {
+        ZStack {
+            Circle()
+                .fill(Color.blue.opacity(0.7))
+                .frame(width: 44, height: 44)
+            Text(initials)
+                .font(.callout.bold())
+                .foregroundStyle(.white)
+        }
+    }
+
+    private var initials: String {
+        let words = title.split(separator: " ")
+        return words.prefix(2).map { String($0.prefix(1)) }.joined().uppercased()
+    }
+
+    private func badge(count: Int) -> some View {
+        Text("\(count)")
+            .font(.caption.bold())
+            .padding(6)
+            .background(Color.blue, in: Capsule())
+            .foregroundStyle(.white)
+    }
+}
+
+private enum Formatter {
+    static let relativeDateFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
+}
+
+private struct NotificationBannerView: View {
+    let notification: NotificationService.ChatNotification
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(notification.senderName)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(notification.body.isEmpty ? "New message" : notification.body)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                Text(notification.timestamp, style: .time)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .shadow(color: Color.black.opacity(0.3), radius: 12, x: 0, y: 8)
     }
 }
 
@@ -433,6 +547,90 @@ private struct AIChatBubble: View {
     }
 }
 
+// MARK: - Conversation Routing Helpers
+
+private struct ConversationRoute: Hashable, Codable {
+    let id: String
+    let title: String?
+    let participantIDs: [String]
+
+    init(id: String, title: String?, participantIDs: [String]) {
+        self.id = id
+        self.title = title
+        self.participantIDs = participantIDs
+    }
+
+    init(from conversation: ConversationEntity) {
+        self.init(id: conversation.id, title: conversation.title, participantIDs: conversation.participantIDs)
+    }
+}
+
+private func placeholderConversation(from route: ConversationRoute, modelContext: ModelContext) -> ConversationEntity {
+    let descriptor = FetchDescriptor<ConversationEntity>(
+        predicate: #Predicate { $0.id == route.id }
+    )
+
+    if let existing = try? modelContext.fetch(descriptor).first {
+        return existing
+    }
+
+    return ConversationEntity(
+        id: route.id,
+        title: route.title,
+        participantIDs: route.participantIDs,
+        type: .oneOnOne,
+        lastMessageID: nil,
+        lastMessagePreview: nil,
+        lastMessageTimestamp: Date(),
+        unreadCount: 0
+    )
+}
+
+private extension ConversationsView {
+    func presenceData(for conversation: ConversationEntity) -> ConversationsViewModel.PresenceViewData {
+        guard let currentUserID = appServices.authService.currentUserID else {
+            return ConversationsViewModel.PresenceViewData(isOnline: false, lastSeen: nil)
+        }
+        return viewModel.presenceState(for: conversation, currentUserID: currentUserID)
+    }
+
+    private func presentNotification(_ notification: NotificationService.ChatNotification) {
+        notificationDismissTask?.cancel()
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            activeNotification = notification
+        }
+
+        notificationDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                if activeNotification?.id == notification.id {
+                    activeNotification = nil
+                }
+            }
+        }
+    }
+
+    private func openConversation(with conversation: ConversationRoute) {
+        activeNotification = nil
+        if !navigationPath.contains(conversation) {
+            navigationPath.append(conversation)
+        }
+    }
+
+    @MainActor
+    private func deleteConversationLocally(_ conversation: ConversationEntity) async {
+        modelContext.delete(conversation)
+        do {
+            try modelContext.save()
+            viewModel.removeConversation(withID: conversation.id)
+        } catch {
+            print("[ConversationsView] Failed to delete conversation locally: \(error)")
+        }
+        pendingDeletion = nil
+        isShowingDeleteConfirmation = false
+    }
+}
+
 @MainActor
 final class AIChatViewModel: ObservableObject {
     enum ContextScope: String, CaseIterable, Identifiable {
@@ -590,11 +788,11 @@ final class AIChatViewModel: ObservableObject {
     }
 
     private func lastMessage(in conversationID: String) -> MessageEntity? {
-        let descriptor = FetchDescriptor<MessageEntity>(
+        var descriptor = FetchDescriptor<MessageEntity>(
             predicate: #Predicate { $0.conversationID == conversationID },
-            sortBy: [SortDescriptor(\.timestamp, order: .reverse)],
-            fetchLimit: 1
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
+        descriptor.fetchLimit = 1
         return try? modelContext.fetch(descriptor).first
     }
 

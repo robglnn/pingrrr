@@ -14,8 +14,8 @@ import {
 
 const culturalHintSchema = z.object({
   text: z.string().min(1, 'Text is required'),
-  language: z.string().optional(),
-  audienceCountry: z.string().optional(),
+  language: z.string().nullish(),
+  audienceCountry: z.string().nullish(),
 });
 
 export const aiCulturalHint = functions
@@ -41,8 +41,8 @@ export const aiCulturalHint = functions
     const { text, language, audienceCountry } = parsed.data;
     const prompt = buildCulturalPrompt({
       text: redactSensitiveData(text),
-      language,
-      audienceCountry,
+      language: language ?? undefined,
+      audienceCountry: audienceCountry ?? undefined,
     });
 
     try {
