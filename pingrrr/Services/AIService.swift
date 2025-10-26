@@ -29,11 +29,17 @@ final class AIService {
     private init() {}
 
     func translate(text: String, targetLang: String?, formality: Formality) async throws -> String {
-        let data = try await call(function: "aiTranslate", payload: [
-            "text": text,
-            "targetLang": targetLang as Any,
-            "formality": formality.firebaseValue as Any,
-        ])
+        var payload: [String: Any] = ["text": text]
+
+        if let targetLang, !targetLang.isEmpty {
+            payload["targetLang"] = targetLang
+        }
+
+        if let formalityValue = formality.firebaseValue {
+            payload["formality"] = formalityValue
+        }
+
+        let data = try await call(function: "aiTranslate", payload: payload)
 
         guard let translated = data["translatedText"] as? String else {
             throw AIServiceError.invalidResponse
@@ -54,11 +60,17 @@ final class AIService {
     }
 
     func culturalHint(text: String, language: String?, audienceCountry: String?) async throws -> String {
-        let data = try await call(function: "aiCulturalHint", payload: [
-            "text": text,
-            "language": language as Any,
-            "audienceCountry": audienceCountry as Any,
-        ])
+        var payload: [String: Any] = ["text": text]
+
+        if let language, !language.isEmpty {
+            payload["language"] = language
+        }
+
+        if let audienceCountry, !audienceCountry.isEmpty {
+            payload["audienceCountry"] = audienceCountry
+        }
+
+        let data = try await call(function: "aiCulturalHint", payload: payload)
 
         guard let hint = data["hint"] as? String else {
             throw AIServiceError.invalidResponse
@@ -67,10 +79,13 @@ final class AIService {
     }
 
     func explainSlang(text: String, language: String?) async throws -> String {
-        let data = try await call(function: "aiExplainSlang", payload: [
-            "text": text,
-            "language": language as Any,
-        ])
+        var payload: [String: Any] = ["text": text]
+
+        if let language, !language.isEmpty {
+            payload["language"] = language
+        }
+
+        let data = try await call(function: "aiExplainSlang", payload: payload)
 
         guard let explanation = data["explanation"] as? String else {
             throw AIServiceError.invalidResponse
@@ -79,11 +94,16 @@ final class AIService {
     }
 
     func adjustTone(text: String, language: String?, formality: Formality) async throws -> String {
-        let data = try await call(function: "aiAdjustTone", payload: [
+        var payload: [String: Any] = [
             "text": text,
-            "language": language as Any,
             "formality": formality.firebaseValue ?? formality.rawValue,
-        ])
+        ]
+
+        if let language, !language.isEmpty {
+            payload["language"] = language
+        }
+
+        let data = try await call(function: "aiAdjustTone", payload: payload)
 
         guard let adjusted = data["adjustedText"] as? String else {
             throw AIServiceError.invalidResponse
@@ -120,12 +140,17 @@ final class AIService {
     }
 
     func assistantReply(prompt: String, conversationID: String?, lastN: Int = 10, includeFullHistory: Bool = false) async throws -> String {
-        let data = try await call(function: "aiAssistant", payload: [
+        var payload: [String: Any] = [
             "prompt": prompt,
-            "conversationId": conversationID as Any,
             "lastN": lastN,
             "includeFullHistory": includeFullHistory,
-        ])
+        ]
+
+        if let conversationID, !conversationID.isEmpty {
+            payload["conversationId"] = conversationID
+        }
+
+        let data = try await call(function: "aiAssistant", payload: payload)
 
         guard let reply = data["reply"] as? String else {
             throw AIServiceError.invalidResponse

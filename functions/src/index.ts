@@ -159,6 +159,19 @@ export const onAuthUserCreate = functions
         },
         { merge: true }
       );
+
+    await db
+      .collection('subscriptions')
+      .doc(uid)
+      .set(
+        {
+          tier: 'free',
+          status: 'active',
+          source: 'system-default',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
   });
 
 export {

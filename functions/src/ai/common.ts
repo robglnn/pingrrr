@@ -3,7 +3,9 @@ import * as functions from 'firebase-functions';
 import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
 
-const DAILY_USAGE_LIMIT_FREE = 20;
+const DAILY_USAGE_LIMIT_FREE = 100;
+const DAILY_USAGE_LIMIT_PRO = 100;
+const DEFAULT_TIER = 'free';
 
 interface ConversationMessageData {
   senderID?: string;
@@ -41,9 +43,12 @@ export async function assertUsageAllowance(uid: string, increment = 1): Promise<
   const dateKey = getDateKey();
   const docRef = admin.firestore().doc(usageDocPath(uid, dateKey));
   const snap = await docRef.get();
-  const data = snap.data() ?? { count: 0, tier: 'free' };
+  const data = snap.data() ?? { count: 0, tier: DEFAULT_TIER };
 
-  const tierLimit = resolveTierLimit(data?.tier ?? 'free');
+  const subscriptionDoc = await admin.firestore().collection('subscriptions').doc(uid).get();
+  const subscriptionTier = (subscriptionDoc.data()?.tier as string | undefined) ?? DEFAULT_TIER;
+
+  const tierLimit = resolveTierLimit(subscriptionTier);
   const currentCount = data?.count ?? 0;
 
   if (tierLimit >= 0 && currentCount + increment > tierLimit) {
@@ -56,7 +61,7 @@ export async function assertUsageAllowance(uid: string, increment = 1): Promise<
   await docRef.set(
     {
       count: admin.firestore.FieldValue.increment(increment),
-      tier: data?.tier ?? 'free',
+      tier: subscriptionTier,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true }
@@ -67,8 +72,9 @@ function resolveTierLimit(tier: string): number {
   switch (tier) {
     case 'unlimited':
       return -1;
+    case 'pro':
     case 'premium':
-      return 200;
+      return DAILY_USAGE_LIMIT_PRO;
     case 'free':
     default:
       return DAILY_USAGE_LIMIT_FREE;

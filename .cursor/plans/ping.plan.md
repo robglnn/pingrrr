@@ -163,7 +163,6 @@
 - Paid tiers integration (Stripe); placeholders in backend.
 - Full-context toggle UI location (AI chat header vs per-request).
 
-
 ### To-dos
 
 - [ ] Set up Firebase Functions with Vercel AI SDK, env, shared utils (RAG, cache, rate limit)

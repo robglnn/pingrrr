@@ -10,11 +10,12 @@
 - Wired `AIService`/`AIPreferencesService` on iOS; long-press actions now surface translation, slang explanations, cultural hints, and tone adjustments inline.
 - Added contextual insight bubbles in chat UI and ensured Firestore/Vercel secrets are configured.
 - Built the dedicated AI Assistant chat view with context selection, quick actions, and assistant responses.
+- Raised the daily AI allowance to 100 requests for free users and fixed the inline translation action by cleaning callable payloads.
 
 ## Immediate Next Steps
 - Polish translation toggle UX (globe button feedback) and capture translation history for assistant chat.
 - Implement smart replies surface + thumbs feedback and proactive prompts (language switch, typing pause).
-- Add rate-limit UX (20 req/day) and latency/token logging per plan.
+- Add rate-limit UX (100 req/day) and latency/token logging per plan.
 - Begin integrating assistant responses with saved history (aiHistory) for future analytics.
 
 ## Key Considerations

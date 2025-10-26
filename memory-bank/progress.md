@@ -5,6 +5,7 @@
 - Inline AI actions (translation, cultural hints, slang explanations, tone adjustments) available via long press with contextual insight bubbles.
 - Firebase Functions deployed with OpenAI secret + Vercel AI SDK; Vercel project configured with matching env variables.
 - Dedicated AI Assistant chat view added to conversations list with context selection, quick actions, and assistant responses.
+- Updated mobile AI service to send clean payloads (no null optionals), restoring long-press translation flow; increased free-tier usage cap to 100/day.
 
 ## Recent Highlights
 - Added `AIService`/`AIPreferencesService` plus callable endpoints for translate/detect/hint/tone/slang/smart replies/summarize/assistant.

@@ -60,11 +60,19 @@ export const aiTranslate = functions
 
       const translatedText = await result.text;
 
+      const historyInput: Record<string, unknown> = { text };
+      if (targetLang) {
+        historyInput.targetLang = targetLang;
+      }
+      if (formality) {
+        historyInput.formality = formality;
+      }
+
       await recordAIHistory({
         uid: context.auth.uid,
         sessionId,
         type: 'translation',
-        input: { text, targetLang, formality },
+        input: historyInput,
         output: { translatedText },
         latencyMs: Date.now() - startedAt,
         tool: 'translate',
