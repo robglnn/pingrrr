@@ -17,7 +17,15 @@ struct ReadReceiptsView: View {
             } else {
                 ForEach(readEntries, id: \.userID) { entry in
                     HStack(spacing: 12) {
-                        OverlappingAvatarView(profiles: entry.profiles)
+                        AsyncProfileImageView(
+                            userID: entry.userID,
+                            displayName: entry.displayName,
+                            photoURL: entry.photoURL,
+                            photoVersion: entry.photoVersion,
+                            size: .regular,
+                            showsBorder: true
+                        )
+                        .frame(width: 28, height: 28)
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.displayName)
@@ -47,8 +55,9 @@ struct ReadReceiptsView: View {
                 return ReadEntry(
                     userID: userID,
                     displayName: profile.displayName,
-                    timestamp: readTimestamp,
-                    profiles: [profile]
+                    photoURL: profile.profilePictureURL,
+                    photoVersion: profile.photoVersion,
+                    timestamp: readTimestamp
                 )
             }
             .sorted { $0.timestamp < $1.timestamp }
@@ -57,60 +66,8 @@ struct ReadReceiptsView: View {
     struct ReadEntry {
         let userID: String
         let displayName: String
+        let photoURL: String?
+        let photoVersion: Int
         let timestamp: Date
-        let profiles: [UserProfile]
-    }
-}
-
-struct OverlappingAvatarView: View {
-    let profiles: [UserProfile]
-
-    var body: some View {
-        ZStack(alignment: .leading) {
-            ForEach(Array(profiles.enumerated()), id: \.offset) { index, profile in
-                avatar(for: profile)
-                    .offset(x: CGFloat(index) * 20)
-            }
-        }
-        .frame(width: CGFloat(profiles.count) * 20 + 28)
-    }
-
-    private func avatar(for profile: UserProfile) -> some View {
-        Group {
-            if let urlString = profile.profilePictureURL,
-               let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .empty:
-                        placeholder(for: profile)
-                    case .failure:
-                        placeholder(for: profile)
-                    @unknown default:
-                        placeholder(for: profile)
-                    }
-                }
-            } else {
-                placeholder(for: profile)
-            }
-        }
-        .frame(width: 28, height: 28)
-        .clipShape(Circle())
-        .overlay(
-            Circle().stroke(Color.white.opacity(0.6), lineWidth: 1)
-        )
-    }
-
-    private func placeholder(for profile: UserProfile) -> some View {
-        Circle()
-            .fill(Color.blue.opacity(0.2))
-            .overlay(
-                Text(profile.displayName.prefix(1).uppercased())
-                    .font(.caption.bold())
-                    .foregroundColor(.blue)
-            )
     }
 }

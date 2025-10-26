@@ -514,55 +514,36 @@ private struct MessageRowView: View {
             .compactMap { userID -> ReadReceiptEntry? in
                 guard let profile = viewModel.readReceiptProfiles[userID] ?? viewModel.cachedProfile(for: userID) else { return nil }
                 let timestamp = item.message.readTimestamps[userID]
-                return ReadReceiptEntry(userID: userID, profile: profile, timestamp: timestamp)
+                return ReadReceiptEntry(
+                    userID: userID,
+                    displayName: profile.displayName,
+                    profilePictureURL: profile.profilePictureURL,
+                    photoVersion: profile.photoVersion,
+                    timestamp: timestamp
+                )
             }
         return entries.sorted { ($0.timestamp ?? .distantPast) < ($1.timestamp ?? .distantPast) }
     }
 
     @ViewBuilder
     private var avatarView: some View {
-        if let urlString = item.senderProfile?.profilePictureURL,
-           let url = URL(string: urlString) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case let .success(image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .empty:
-                    ProgressView()
-                case .failure:
-                    placeholder
-                @unknown default:
-                    placeholder
-                }
-            }
-            .frame(width: 36, height: 36)
-            .clipShape(Circle())
-        } else {
-            placeholder
-                .frame(width: 36, height: 36)
-        }
-    }
-
-    private var placeholder: some View {
-        Circle()
-            .fill(Color.blue.opacity(0.2))
-            .overlay(
-                Text(senderInitial)
-                    .font(.caption.bold())
-                    .foregroundColor(.blue)
-            )
+        let profile = item.senderProfile ?? viewModel.cachedProfile(for: item.message.senderID)
+        AsyncProfileImageView(
+            userID: profile?.id ?? item.message.senderID,
+            displayName: profile?.displayName ?? "User",
+            photoURL: profile?.profilePictureURL,
+            photoVersion: profile?.photoVersion ?? 0,
+            size: .regular,
+            showsBorder: false
+        )
+        .frame(width: 36, height: 36)
     }
 
     private var senderName: String {
-        item.senderProfile?.displayName ?? item.message.senderID
-    }
-
-    private var senderInitial: String {
-        senderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "?"
-            : String(senderName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased()
+        if let profile = item.senderProfile ?? viewModel.cachedProfile(for: item.message.senderID) {
+            return profile.displayName
+        }
+        return item.isCurrentUser ? "You" : item.message.senderID
     }
 }
 
@@ -877,35 +858,10 @@ private enum Formatter {
 private struct ReadReceiptEntry: Identifiable {
     let id = UUID()
     let userID: String
-    let profile: UserProfile
+    let displayName: String
+    let profilePictureURL: String?
+    let photoVersion: Int
     let timestamp: Date?
-
-    var avatar: some View {
-        Group {
-            if let urlString = profile.profilePictureURL, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image.resizable().scaledToFill()
-                    default:
-                        placeholder
-                    }
-                }
-            } else {
-                placeholder
-            }
-        }
-    }
-
-    private var placeholder: some View {
-        Circle()
-            .fill(Color.blue.opacity(0.2))
-            .overlay(
-                Text(profile.displayName.prefix(1).uppercased())
-                    .font(.caption.bold())
-                    .foregroundColor(.blue)
-            )
-    }
 }
 
 private struct OverlappingStatusAvatars: View {
@@ -914,12 +870,15 @@ private struct OverlappingStatusAvatars: View {
     var body: some View {
         HStack(spacing: -6) {
             ForEach(entries.prefix(3), id: \.id) { entry in
-                entry.avatar
-                    .frame(width: 16, height: 16)
-                    .clipShape(Circle())
-                    .overlay(
-                        Circle().stroke(Color.black, lineWidth: 1)
-                    )
+                AsyncProfileImageView(
+                    userID: entry.userID,
+                    displayName: entry.displayName,
+                    photoURL: entry.profilePictureURL,
+                    photoVersion: entry.photoVersion,
+                    size: .mini,
+                    showsBorder: true
+                )
+                .frame(width: 16, height: 16)
             }
         }
     }

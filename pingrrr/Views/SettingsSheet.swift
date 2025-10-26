@@ -113,38 +113,15 @@ struct ProfileAvatarView: View {
     let profile: UserProfile?
 
     var body: some View {
-        Group {
-            if let urlString = profile?.profilePictureURL,
-               let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .empty:
-                        ProgressView()
-                    case .failure:
-                        placeholder
-                    @unknown default:
-                        placeholder
-                    }
-                }
-            } else {
-                placeholder
-            }
-        }
+        AsyncProfileImageView(
+            userID: profile?.id ?? "current-user",
+            displayName: profile?.displayName ?? "User",
+            photoURL: profile?.profilePictureURL,
+            photoVersion: profile?.photoVersion ?? 0,
+            size: .regular,
+            showsBorder: true
+        )
         .clipShape(Circle())
-    }
-
-    private var placeholder: some View {
-        Circle()
-            .fill(Color.blue.opacity(0.15))
-            .overlay(
-                Text((profile?.displayName ?? "?").prefix(1).uppercased())
-                    .font(.headline.bold())
-                    .foregroundColor(.blue)
-            )
     }
 }
 

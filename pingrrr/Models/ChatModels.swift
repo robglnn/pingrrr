@@ -10,6 +10,7 @@ struct UserProfile: Codable, Identifiable, Sendable {
     var onlineStatus: Bool
     var lastSeen: Date?
     var fcmToken: String?
+    var photoVersion: Int
 
     init(
         id: String,
@@ -18,7 +19,8 @@ struct UserProfile: Codable, Identifiable, Sendable {
         profilePictureURL: String? = nil,
         onlineStatus: Bool = false,
         lastSeen: Date? = nil,
-        fcmToken: String? = nil
+        fcmToken: String? = nil,
+        photoVersion: Int = 0
     ) {
         self.id = id
         self.displayName = displayName
@@ -27,6 +29,7 @@ struct UserProfile: Codable, Identifiable, Sendable {
         self.onlineStatus = onlineStatus
         self.lastSeen = lastSeen
         self.fcmToken = fcmToken
+        self.photoVersion = photoVersion
     }
 }
 
@@ -39,6 +42,7 @@ final class UserEntity {
     var onlineStatus: Bool
     var lastSeen: Date?
     var fcmToken: String?
+    var photoVersion: Int
 
     init(
         id: String,
@@ -47,7 +51,8 @@ final class UserEntity {
         profilePictureURL: String? = nil,
         onlineStatus: Bool = false,
         lastSeen: Date? = nil,
-        fcmToken: String? = nil
+        fcmToken: String? = nil,
+        photoVersion: Int = 0
     ) {
         self.id = id
         self.displayName = displayName
@@ -56,6 +61,7 @@ final class UserEntity {
         self.onlineStatus = onlineStatus
         self.lastSeen = lastSeen
         self.fcmToken = fcmToken
+        self.photoVersion = photoVersion
     }
 }
 

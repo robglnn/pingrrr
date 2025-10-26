@@ -74,23 +74,15 @@ struct ProfileEditView: View {
                     Image(uiImage: selectedImage)
                         .resizable()
                         .scaledToFill()
-                } else if let profile = profileService.currentUserProfile,
-                          let urlString = profile.profilePictureURL,
-                          let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case let .success(image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        case .empty:
-                            ProgressView()
-                        case .failure:
-                            placeholder
-                        @unknown default:
-                            placeholder
-                        }
-                    }
+                } else if let profile = profileService.currentUserProfile {
+                    AsyncProfileImageView(
+                        userID: profile.id,
+                        displayName: profile.displayName,
+                        photoURL: profile.profilePictureURL,
+                        photoVersion: profile.photoVersion,
+                        size: .regular,
+                        showsBorder: true
+                    )
                 } else {
                     placeholder
                 }

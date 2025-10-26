@@ -20,6 +20,7 @@ final class ProfileService: ObservableObject {
         do {
             let document = try await db.collection("users").document(userID).getDocument()
             let data = document.data()
+            let photoVersionValue = (data?["photoVersion"] as? NSNumber)?.intValue ?? 0
 
             let profile = UserProfile(
                 id: userID,
@@ -28,7 +29,8 @@ final class ProfileService: ObservableObject {
                 profilePictureURL: data?["profilePictureURL"] as? String,
                 onlineStatus: data?["onlineStatus"] as? Bool ?? false,
                 lastSeen: (data?["lastSeen"] as? Timestamp)?.dateValue(),
-                fcmToken: data?["fcmToken"] as? String
+                fcmToken: data?["fcmToken"] as? String,
+                photoVersion: photoVersionValue
             )
 
             currentUserProfile = profile
@@ -85,10 +87,13 @@ final class ProfileService: ObservableObject {
         try await db.collection("users").document(userID).setData(
             [
                 "profilePictureURL": downloadURL.absoluteString,
+                "photoVersion": FieldValue.increment(Int64(1)),
                 "updatedAt": FieldValue.serverTimestamp()
             ],
             merge: true
         )
+
+        await ProfileImageCache.shared.invalidate(userID: userID)
 
         await loadCurrentUserProfile()
 
@@ -98,6 +103,7 @@ final class ProfileService: ObservableObject {
     func fetchUserProfile(userID: String) async throws -> UserProfile {
         let document = try await db.collection("users").document(userID).getDocument()
         let data = document.data() ?? [:]
+        let photoVersionValue = (data["photoVersion"] as? NSNumber)?.intValue ?? 0
 
         return UserProfile(
             id: userID,
@@ -106,7 +112,8 @@ final class ProfileService: ObservableObject {
             profilePictureURL: data["profilePictureURL"] as? String,
             onlineStatus: data["onlineStatus"] as? Bool ?? false,
             lastSeen: (data["lastSeen"] as? Timestamp)?.dateValue(),
-            fcmToken: data["fcmToken"] as? String
+            fcmToken: data["fcmToken"] as? String,
+            photoVersion: photoVersionValue
         )
     }
 }

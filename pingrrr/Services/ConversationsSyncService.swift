@@ -317,7 +317,7 @@ final class ConversationsSyncService {
             guard let data = snapshot.data() else { return nil }
             let displayName = data["displayName"] as? String
             let email = data["email"] as? String
-            cacheUser(userID: userID, displayName: displayName, email: email)
+            cacheUser(userID: userID, displayName: displayName, email: email, profilePictureURL: nil, photoVersion: nil)
             return displayName
         } catch {
             print("[ConversationsSync] Failed to fetch user display name: \(error)")
@@ -333,7 +333,13 @@ final class ConversationsSyncService {
         return try? modelContext.fetch(descriptor).first?.displayName
     }
 
-    private func cacheUser(userID: String, displayName: String?, email: String?) {
+    private func cacheUser(
+        userID: String,
+        displayName: String?,
+        email: String?,
+        profilePictureURL: String?,
+        photoVersion: Int?
+    ) {
         guard let modelContext, let displayName else { return }
 
         let descriptor = FetchDescriptor<UserEntity>(
@@ -341,13 +347,21 @@ final class ConversationsSyncService {
         )
 
         if let existing = try? modelContext.fetch(descriptor).first {
+            let previousVersion = existing.photoVersion
             existing.displayName = displayName
             if let email { existing.email = email }
+            if let profilePictureURL { existing.profilePictureURL = profilePictureURL }
+            if let photoVersion { existing.photoVersion = photoVersion }
+            if let photoVersion, previousVersion != photoVersion {
+                Task { await ProfileImageCache.shared.invalidate(userID: userID, photoVersion: previousVersion) }
+            }
         } else {
             let user = UserEntity(
                 id: userID,
                 displayName: displayName,
-                email: email ?? ""
+                email: email ?? "",
+                profilePictureURL: profilePictureURL,
+                photoVersion: photoVersion ?? 0
             )
             modelContext.insert(user)
         }

@@ -294,7 +294,16 @@ final class MessageSyncService {
             }
             let displayName = data["displayName"] as? String
             if let displayName {
-                cacheUser(userID: userID, displayName: displayName, email: (data["email"] as? String) ?? "", in: context)
+                let photoURL = data["profilePictureURL"] as? String
+                let photoVersion = (data["photoVersion"] as? NSNumber)?.intValue ?? 0
+                cacheUser(
+                    userID: userID,
+                    displayName: displayName,
+                    email: (data["email"] as? String) ?? "",
+                    profilePictureURL: photoURL,
+                    photoVersion: photoVersion,
+                    in: context
+                )
             }
             return displayName
         } catch {
@@ -303,19 +312,34 @@ final class MessageSyncService {
         }
     }
 
-    private func cacheUser(userID: String, displayName: String, email: String, in context: ModelContext) {
+    private func cacheUser(
+        userID: String,
+        displayName: String,
+        email: String,
+        profilePictureURL: String?,
+        photoVersion: Int,
+        in context: ModelContext
+    ) {
         let descriptor = FetchDescriptor<UserEntity>(
             predicate: #Predicate { $0.id == userID }
         )
 
         if let existing = try? context.fetch(descriptor).first {
+            let previousVersion = existing.photoVersion
             existing.displayName = displayName
             existing.email = email
+            existing.profilePictureURL = profilePictureURL
+            existing.photoVersion = photoVersion
+            if previousVersion != photoVersion {
+                Task { await ProfileImageCache.shared.invalidate(userID: userID, photoVersion: previousVersion) }
+            }
         } else {
             let user = UserEntity(
                 id: userID,
                 displayName: displayName,
-                email: email
+                email: email,
+                profilePictureURL: profilePictureURL,
+                photoVersion: photoVersion
             )
             context.insert(user)
         }

@@ -11,6 +11,7 @@
 - Added contextual insight bubbles in chat UI and ensured Firestore/Vercel secrets are configured.
 - Built the dedicated AI Assistant chat view with context selection, quick actions, and assistant responses.
 - Raised the daily AI allowance to 100 requests for free users and fixed the inline translation action by cleaning callable payloads.
+- Added a version-aware `ProfileImageCache` with disk + memory tiers and wired AsyncProfileImageView across chat/read receipts to stop redundant avatar downloads.
 
 ## Immediate Next Steps
 - Polish translation toggle UX (globe button feedback) and capture translation history for assistant chat.

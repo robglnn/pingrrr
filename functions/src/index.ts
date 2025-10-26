@@ -156,6 +156,7 @@ export const onAuthUserCreate = functions
         {
           ...data,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          photoVersion: 0,
         },
         { merge: true }
       );
