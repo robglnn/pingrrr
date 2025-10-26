@@ -352,7 +352,7 @@ final class ConversationsSyncService {
             if let email { existing.email = email }
             if let profilePictureURL { existing.profilePictureURL = profilePictureURL }
             if let photoVersion { existing.photoVersion = photoVersion }
-            if let photoVersion, previousVersion != photoVersion {
+            if let photoVersion, previousVersion != Optional(photoVersion) {
                 Task { await ProfileImageCache.shared.invalidate(userID: userID, photoVersion: previousVersion) }
             }
         } else {

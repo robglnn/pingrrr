@@ -8,7 +8,6 @@
 import SwiftUI
 import SwiftData
 
-@main
 struct PingrrrApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 

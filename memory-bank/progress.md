@@ -7,12 +7,14 @@
 - Dedicated AI Assistant chat view added to conversations list with context selection, quick actions, and assistant responses.
 - Updated mobile AI service to send clean payloads (no null optionals), restoring long-press translation flow; increased free-tier usage cap to 100/day.
 - Implemented profile photo versioning plus a Swift/SwiftUI image cache (memory + disk) to reuse avatars across chat bubbles and read receipts with AsyncProfileImageView.
+- Cleared SwiftData migration blockers by making `photoVersion` optional and introduced an explicit `AppMain` launcher, restoring clean simulator builds.
 
 ## Recent Highlights
 - Added `AIService`/`AIPreferencesService` plus callable endpoints for translate/detect/hint/tone/slang/smart replies/summarize/assistant.
 - Contextual globe toggle hooked into ChatViewModel with caching; long-press menu triggers additional AI helpers and insight cards.
 - Deployed updated Firestore rules + secret-managed functions; verified build using `npm run build` and `firebase deploy`.
 - Set up Vercel project and stored `OPENAI_API_KEY` for future edge/preview work.
+- Completed end-to-end avatar caching (chat list, message rows, read receipts) and validated Xcode build after migration fix.
 
 ## Status Summary (Oct 24, 2025)
 - Core messaging foundation in place with SwiftData + Firestore sync, presence, and notification pipeline.

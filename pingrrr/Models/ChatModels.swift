@@ -42,7 +42,7 @@ final class UserEntity {
     var onlineStatus: Bool
     var lastSeen: Date?
     var fcmToken: String?
-    var photoVersion: Int
+    var photoVersion: Int?
 
     init(
         id: String,
@@ -52,7 +52,7 @@ final class UserEntity {
         onlineStatus: Bool = false,
         lastSeen: Date? = nil,
         fcmToken: String? = nil,
-        photoVersion: Int = 0
+        photoVersion: Int? = nil
     ) {
         self.id = id
         self.displayName = displayName

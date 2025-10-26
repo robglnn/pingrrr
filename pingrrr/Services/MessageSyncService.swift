@@ -330,7 +330,7 @@ final class MessageSyncService {
             existing.email = email
             existing.profilePictureURL = profilePictureURL
             existing.photoVersion = photoVersion
-            if previousVersion != photoVersion {
+            if previousVersion != Optional(photoVersion) {
                 Task { await ProfileImageCache.shared.invalidate(userID: userID, photoVersion: previousVersion) }
             }
         } else {

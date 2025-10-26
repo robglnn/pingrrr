@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-enum ProfileImageSize: CaseIterable {
+enum ProfileImageSize: CaseIterable, Sendable {
     case regular
     case mini
 
@@ -73,15 +73,13 @@ actor ProfileImageCache {
         }
 
         if observesSystemNotifications {
-            memoryWarningObserver = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { await self?.clearMemory() }
-            }
+            Task { await self.registerMemoryWarningObserver() }
         }
     }
 
     deinit {
         if let token = memoryWarningObserver {
-            NotificationCenter.default.removeObserver(token)
+            Task { await MainActor.run { NotificationCenter.default.removeObserver(token) } }
         }
     }
 
@@ -133,7 +131,11 @@ actor ProfileImageCache {
         }
     }
 
-    func invalidate(userID: String, photoVersion: Int) async {
+    func invalidate(userID: String, photoVersion: Int?) async {
+        guard let photoVersion else {
+            await invalidate(userID: userID)
+            return
+        }
         let baseKey = "\(userID)_v\(photoVersion)"
         for size in ProfileImageSize.allCases {
             let key = "\(baseKey)_\(size.cacheSuffix)"
@@ -200,6 +202,16 @@ actor ProfileImageCache {
         var keys = keyIndex[userID] ?? []
         keys.insert(key)
         keyIndex[userID] = keys
+    }
+
+    @Sendable
+    private func registerMemoryWarningObserver() async {
+        let token = await MainActor.run {
+            NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { await self?.clearMemory() }
+            }
+        }
+        memoryWarningObserver = token
     }
 
     private func sourceData(for descriptor: Descriptor) async throws -> Data {
