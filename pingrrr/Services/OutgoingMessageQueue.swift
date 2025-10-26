@@ -177,6 +177,11 @@ final class OutgoingMessageQueue {
             "readBy": message.readBy
         ]
 
+        if !message.readTimestamps.isEmpty {
+            let map = message.readTimestamps.mapValues { Timestamp(date: $0) }
+            payload["readTimestamps"] = map
+        }
+
         if let mediaURL = message.mediaURL {
             payload["mediaURL"] = mediaURL
             payload["mediaType"] = message.mediaType?.rawValue

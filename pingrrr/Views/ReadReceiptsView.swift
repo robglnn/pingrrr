@@ -37,15 +37,21 @@ struct ReadReceiptsView: View {
     private var readEntries: [ReadEntry] {
         guard !message.readBy.isEmpty else { return [] }
 
-        return message.readBy.compactMap { userID in
-            guard let profile = participants[userID] else { return nil }
-            return ReadEntry(
-                userID: userID,
-                displayName: profile.displayName,
-                timestamp: message.timestamp,
-                profiles: [profile]
-            )
-        }
+        let senderID = message.senderID
+
+        return message.readBy
+            .filter { $0 != senderID }
+            .compactMap { userID in
+                guard let profile = participants[userID] else { return nil }
+                let readTimestamp = message.readTimestamps[userID] ?? message.timestamp
+                return ReadEntry(
+                    userID: userID,
+                    displayName: profile.displayName,
+                    timestamp: readTimestamp,
+                    profiles: [profile]
+                )
+            }
+            .sorted { $0.timestamp < $1.timestamp }
     }
 
     struct ReadEntry {

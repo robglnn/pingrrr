@@ -37,6 +37,10 @@ final class ChatViewModel: ObservableObject {
         appServices.voiceMessageService
     }
 
+    private var networkMonitor: NetworkMonitor {
+        appServices.networkMonitor
+    }
+
     private var aiPreferences: AIPreferences {
         AIPreferencesService.shared.preferences
     }
@@ -64,6 +68,10 @@ final class ChatViewModel: ObservableObject {
 
     var aiIsProcessingTranslation: Bool {
         isAIProcessingTranslation
+    }
+
+    var loggedInUserID: String {
+        currentUserID
     }
 
     private var cancellables: Set<AnyCancellable> = []
@@ -345,8 +353,15 @@ final class ChatViewModel: ObservableObject {
 
     func retrySendingMessage(_ message: MessageEntity) async {
         guard message.status == .failed || message.isLocalOnly else { return }
+        let wasFailed = message.status == .failed
         outgoingQueue.enqueueRetry(for: message)
-        await resend(message)
+
+        if networkMonitor.isReachable {
+            await resend(message)
+        } else if wasFailed {
+            message.status = .failed
+            regroupMessages()
+        }
     }
 
     private func resend(_ message: MessageEntity) async {
@@ -407,6 +422,7 @@ final class ChatViewModel: ObservableObject {
             timestamp: now,
             status: .sending,
             readBy: [currentUserID],
+            readTimestamps: [currentUserID: now],
             isLocalOnly: true,
             retryCount: 0,
             nextRetryTimestamp: nil,
@@ -422,6 +438,12 @@ final class ChatViewModel: ObservableObject {
 
         updateConversationForOutgoingMessage(content: optimisticContent, timestamp: now, messageID: tempID)
 
+        if !networkMonitor.isReachable {
+            outgoingQueue.enqueueRetry(for: optimisticMessage)
+            regroupMessages()
+            return
+        }
+
         sendToFirestore(optimisticMessage)
     }
 
@@ -435,6 +457,11 @@ final class ChatViewModel: ObservableObject {
             "status": MessageStatus.sent.rawValue,
             "readBy": message.readBy
         ]
+
+        if !message.readTimestamps.isEmpty {
+            let map = message.readTimestamps.mapValues { Timestamp(date: $0) }
+            payload["readTimestamps"] = map
+        }
 
         if let mediaURL = message.mediaURL {
             payload["mediaURL"] = mediaURL
@@ -488,9 +515,13 @@ final class ChatViewModel: ObservableObject {
         for message in unreadMessages {
             let messageRef = conversationRef.collection("messages").document(message.id)
             batch.updateData([
-                "readBy": FieldValue.arrayUnion([currentUserID])
+                "readBy": FieldValue.arrayUnion([currentUserID]),
+                "readTimestamps.\(currentUserID)": FieldValue.serverTimestamp()
             ], forDocument: messageRef)
-            message.readBy.append(currentUserID)
+            if !message.readBy.contains(currentUserID) {
+                message.readBy.append(currentUserID)
+            }
+            message.readTimestamps[currentUserID] = Date()
             message.status = .read
         }
 
@@ -519,6 +550,7 @@ final class ChatViewModel: ObservableObject {
 
     func userStartedViewingChat() {
         NotificationService.shared.setCurrentChatID(conversationID)
+        Task { await markMessagesAsRead() }
     }
 
     func userLeftChat() {
@@ -535,6 +567,7 @@ final class ChatViewModel: ObservableObject {
         regroupMessages()
         updateReadReceiptProfiles()
         refreshConversationReference()
+        Task { await markMessagesAsRead() }
     }
 
     private func refreshConversationReference() {

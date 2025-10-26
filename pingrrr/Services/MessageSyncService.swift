@@ -120,6 +120,7 @@ final class MessageSyncService {
                 timestamp: record.timestamp ?? Date(),
                 status: record.status ?? .sent,
                 readBy: record.readBy ?? [],
+                readTimestamps: record.readTimestamps ?? [:],
                 isLocalOnly: false,
                 retryCount: 0,
                 nextRetryTimestamp: nil,
@@ -161,6 +162,10 @@ final class MessageSyncService {
 
         if let readBy = record.readBy {
             entity.readBy = readBy
+        }
+
+        if let readTimestamps = record.readTimestamps {
+            entity.readTimestamps = readTimestamps
         }
 
         entity.isLocalOnly = false
@@ -328,6 +333,7 @@ private struct MessageRecord: Codable {
     var timestamp: Date?
     var status: MessageStatus?
     var readBy: [String]?
+    var readTimestamps: [String: Date]?
     var unreadCounts: [String: Int]?
     var mediaURL: String?
     var mediaType: String?
@@ -342,6 +348,7 @@ private struct MessageRecord: Codable {
         case timestamp
         case status
         case readBy
+        case readTimestamps
         case unreadCounts
         case mediaURL
         case mediaType
@@ -357,6 +364,7 @@ private struct MessageRecord: Codable {
         timestamp: Date? = nil,
         status: MessageStatus? = nil,
         readBy: [String]? = nil,
+        readTimestamps: [String: Date]? = nil,
         unreadCounts: [String: Int]? = nil,
         mediaURL: String? = nil,
         mediaType: MessageMediaType? = nil
@@ -369,6 +377,7 @@ private struct MessageRecord: Codable {
         self.timestamp = timestamp
         self.status = status
         self.readBy = readBy
+        self.readTimestamps = readTimestamps
         self.unreadCounts = unreadCounts
         self.mediaURL = mediaURL
         self.mediaType = mediaType?.rawValue

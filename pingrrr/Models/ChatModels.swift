@@ -133,6 +133,22 @@ final class ConversationEntity {
         }
         return ids
     }
+
+    static func encodeTimestampMap(_ map: [String: Date]) -> String {
+        guard let data = try? JSONEncoder().encode(map),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return string
+    }
+
+    static func decodeTimestampMap(_ string: String) -> [String: Date] {
+        guard let data = string.data(using: .utf8),
+              let map = try? JSONDecoder().decode([String: Date].self, from: data) else {
+            return [:]
+        }
+        return map
+    }
 }
 
 enum MessageStatus: String, Codable, CaseIterable, Sendable {
@@ -182,6 +198,7 @@ final class MessageEntity {
     var timestamp: Date
     var statusRawValue: String
     var readByString: String // Store as JSON string for now
+    var readTimestampsString: String = MessageEntity.encodeTimestampMap([:]) // JSON map of userID -> read date
     var isLocalOnly: Bool
     var retryCount: Int
     var nextRetryTimestamp: Date?
@@ -202,6 +219,7 @@ final class MessageEntity {
         timestamp: Date,
         status: MessageStatus,
         readBy: [String] = [],
+        readTimestamps: [String: Date] = [:],
         isLocalOnly: Bool = false,
         retryCount: Int = 0,
         nextRetryTimestamp: Date? = nil,
@@ -217,6 +235,7 @@ final class MessageEntity {
         self.timestamp = timestamp
         self.statusRawValue = status.rawValue
         self.readByString = MessageEntity.encodeIDs(readBy)
+        self.readTimestampsString = MessageEntity.encodeTimestampMap(readTimestamps)
         self.isLocalOnly = isLocalOnly
         self.retryCount = retryCount
         self.nextRetryTimestamp = nextRetryTimestamp
@@ -233,6 +252,11 @@ final class MessageEntity {
     var readBy: [String] {
         get { MessageEntity.decodeIDs(readByString) }
         set { readByString = MessageEntity.encodeIDs(newValue) }
+    }
+
+    var readTimestamps: [String: Date] {
+        get { MessageEntity.decodeTimestampMap(readTimestampsString) }
+        set { readTimestampsString = MessageEntity.encodeTimestampMap(newValue) }
     }
 
     var mediaType: MessageMediaType? {
@@ -269,6 +293,40 @@ final class MessageEntity {
             return []
         }
         return ids
+    }
+}
+
+extension MessageEntity {
+    private static let timestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    static func encodeTimestampMap(_ map: [String: Date]) -> String {
+        guard !map.isEmpty else { return "{}" }
+
+        let stringMap = map.mapValues { timestampFormatter.string(from: $0) }
+        guard let data = try? JSONEncoder().encode(stringMap),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return string
+    }
+
+    static func decodeTimestampMap(_ string: String) -> [String: Date] {
+        guard let data = string.data(using: .utf8),
+              let raw = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+
+        var result: [String: Date] = [:]
+        for (key, value) in raw {
+            if let date = timestampFormatter.date(from: value) {
+                result[key] = date
+            }
+        }
+        return result
     }
 }
 

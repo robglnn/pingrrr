@@ -43,7 +43,11 @@ struct ChatView: View {
         .toolbarBackground(Color.black, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task { viewModel.start() }
+        .onAppear {
+            viewModel.userStartedViewingChat()
+        }
         .onDisappear {
+            viewModel.userLeftChat()
             viewModel.stop()
         }
         .alert("Voice messages delete after 7 days", isPresented: $showVoiceWarning) {
@@ -502,12 +506,17 @@ private struct MessageRowView: View {
 
     private var readReceiptEntries: [ReadReceiptEntry] {
         guard item.isCurrentUser else { return [] }
-        return item.message.readBy
-            .filter { $0 != item.message.senderID }
+        let currentUserID = viewModel.loggedInUserID
+        let senderID = item.message.senderID
+
+        let entries = item.message.readBy
+            .filter { $0 != currentUserID && $0 != senderID }
             .compactMap { userID -> ReadReceiptEntry? in
                 guard let profile = viewModel.readReceiptProfiles[userID] ?? viewModel.cachedProfile(for: userID) else { return nil }
-                return ReadReceiptEntry(userID: userID, profile: profile)
+                let timestamp = item.message.readTimestamps[userID]
+                return ReadReceiptEntry(userID: userID, profile: profile, timestamp: timestamp)
             }
+        return entries.sorted { ($0.timestamp ?? .distantPast) < ($1.timestamp ?? .distantPast) }
     }
 
     @ViewBuilder
@@ -869,6 +878,7 @@ private struct ReadReceiptEntry: Identifiable {
     let id = UUID()
     let userID: String
     let profile: UserProfile
+    let timestamp: Date?
 
     var avatar: some View {
         Group {
