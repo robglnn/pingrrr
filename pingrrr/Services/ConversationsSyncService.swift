@@ -301,8 +301,10 @@ final class ConversationsSyncService {
             preference.autoTranslateEnabled = remote.enabled ?? false
             preference.nativeLanguageCode = remote.native
             preference.targetLanguageCode = remote.target
+            preference.autoTranslateActivatedAt = remote.activatedAt
         } else {
             preference.autoTranslateEnabled = false
+            preference.autoTranslateActivatedAt = nil
         }
     }
 
@@ -506,5 +508,6 @@ private struct TranslationPreferenceRecord: Codable {
     var enabled: Bool?
     var native: String?
     var target: String?
+    var activatedAt: Date?
 }
 

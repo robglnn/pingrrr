@@ -64,6 +64,7 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var autoTranslateEnabled = false
     @Published private(set) var autoTranslateNativeLanguage: TranslationLanguage = TranslationLanguage.supported.first(where: { $0.code == "en" }) ?? TranslationLanguage.supported.first!
     @Published private(set) var autoTranslateTargetLanguage: TranslationLanguage = TranslationLanguage.supported.first(where: { $0.code == "es" }) ?? TranslationLanguage.supported.first!
+    @Published private(set) var autoTranslateActivatedAt: Date?
 
     private var translationCache: [String: String] = [:]
     private var translationVisibility: [String: Bool] = [:]
@@ -174,12 +175,17 @@ final class ChatViewModel: ObservableObject {
     func toggleAutoTranslate() async {
         autoTranslateEnabled.toggle()
         conversationPreference?.autoTranslateEnabled = autoTranslateEnabled
-        try? modelContext.save()
 
         if autoTranslateEnabled {
-            applyAutoTranslationToCachedMessages(force: true)
+            autoTranslateActivatedAt = Date()
+            conversationPreference?.autoTranslateActivatedAt = autoTranslateActivatedAt
+            try? modelContext.save()
+            applyAutoTranslationToCachedMessages()
         } else {
             cancelPendingAutoTranslationTasks()
+            autoTranslateActivatedAt = nil
+            conversationPreference?.autoTranslateActivatedAt = nil
+            try? modelContext.save()
         }
 
         await persistTranslationPreference()
@@ -703,6 +709,9 @@ final class ChatViewModel: ObservableObject {
             if preference.targetLanguageCode == nil {
                 preference.targetLanguageCode = autoTranslateTargetLanguage.code
             }
+            if preference.autoTranslateActivatedAt == nil, preference.autoTranslateEnabled {
+                preference.autoTranslateActivatedAt = Date()
+            }
             applyTranslationPreference(preference)
             try? modelContext.save()
         }
@@ -716,10 +725,12 @@ final class ChatViewModel: ObservableObject {
         if let target = TranslationLanguage.language(for: preference.targetLanguageCode) {
             autoTranslateTargetLanguage = target
         }
+        autoTranslateActivatedAt = preference.autoTranslateActivatedAt
     }
 
     private func applyAutoTranslationToCachedMessages(force: Bool = false) {
         guard autoTranslateEnabled else { return }
+        guard autoTranslateActivatedAt != nil else { return }
         for message in messages {
             scheduleAutoTranslation(for: message, force: force)
         }
@@ -730,6 +741,8 @@ final class ChatViewModel: ObservableObject {
         guard message.senderID != currentUserID else { return }
         guard message.mediaType == nil else { return }
         guard message.mediaURL == nil else { return }
+        guard let activatedAt = autoTranslateActivatedAt else { return }
+        guard message.timestamp >= activatedAt else { return }
 
         if !force {
             if let existing = message.autoTranslations[currentUserID],
@@ -815,11 +828,17 @@ final class ChatViewModel: ObservableObject {
 
     private func persistTranslationPreference() async {
         let docRef = Firestore.firestore().collection("conversations").document(conversationID)
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "enabled": autoTranslateEnabled,
             "native": autoTranslateNativeLanguage.code,
             "target": autoTranslateTargetLanguage.code
         ]
+
+        if let activatedAt = autoTranslateActivatedAt {
+            payload["activatedAt"] = Timestamp(date: activatedAt)
+        } else {
+            payload["activatedAt"] = FieldValue.delete()
+        }
 
         do {
             try await docRef.setData([
@@ -831,6 +850,11 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func prepareOutgoingAutoTranslations(for text: String) async throws -> [String: MessageAutoTranslation] {
+        if autoTranslateActivatedAt == nil {
+            autoTranslateActivatedAt = Date()
+            conversationPreference?.autoTranslateActivatedAt = autoTranslateActivatedAt
+            try? modelContext.save()
+        }
         let translated = try await AIService.shared.translate(
             text: text,
             targetLang: autoTranslateTargetLanguage.code,
@@ -845,7 +869,7 @@ final class ChatViewModel: ObservableObject {
             updatedAt: Date()
         )
 
-        var map: [String: MessageAutoTranslation] = [
+        let map: [String: MessageAutoTranslation] = [
             Self.broadcastTranslationKey: payload,
             currentUserID: payload
         ]

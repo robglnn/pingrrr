@@ -391,19 +391,22 @@ final class ConversationPreferenceEntity {
     var autoTranslateEnabled: Bool
     var nativeLanguageCode: String?
     var targetLanguageCode: String?
+    var autoTranslateActivatedAt: Date?
 
     init(
         conversationID: String,
         isHidden: Bool = false,
         autoTranslateEnabled: Bool = false,
         nativeLanguageCode: String? = nil,
-        targetLanguageCode: String? = nil
+        targetLanguageCode: String? = nil,
+        autoTranslateActivatedAt: Date? = nil
     ) {
         self.conversationID = conversationID
         self.isHidden = isHidden
         self.autoTranslateEnabled = autoTranslateEnabled
         self.nativeLanguageCode = nativeLanguageCode
         self.targetLanguageCode = targetLanguageCode
+        self.autoTranslateActivatedAt = autoTranslateActivatedAt
     }
 }
 
