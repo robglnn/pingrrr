@@ -17,7 +17,6 @@ struct ChatView: View {
     private let currentUserID: String
 
     @State private var showMediaSheet = false
-    @State private var showMediaPreview = false
     @State private var showVoiceWarning = false
     @State private var scrollProxy: ScrollViewProxy?
     @State private var pendingScrollWorkItem: DispatchWorkItem?
@@ -63,39 +62,15 @@ struct ChatView: View {
                 case let .image(data):
                     Task {
                         await viewModel.enqueuePendingMedia(data: data, type: .image)
-                        showMediaPreview = true
-                        showMediaSheet = false
+                        await MainActor.run {
+                            showMediaSheet = false
+                            inputFocused = true
+                        }
                     }
                 case .cancel:
                     viewModel.clearPendingMedia()
-                    showMediaPreview = false
                     showMediaSheet = false
                 }
-            }
-        }
-        .sheet(isPresented: $showMediaPreview) {
-            if let pending = viewModel.pendingMedia {
-                MediaSendPreview(
-                    pending: pending,
-                    viewModel: viewModel,
-                    onSend: {
-                        Task {
-                            await viewModel.sendPendingMedia()
-                            await MainActor.run {
-                                showMediaPreview = false
-                                scrollToBottom(delayed: true)
-                            }
-                        }
-                    },
-                    onCancel: {
-                        viewModel.clearPendingMedia()
-                        showMediaPreview = false
-                    }
-                )
-                .presentationDetents([.medium])
-            } else {
-                Text("No media selected")
-                    .foregroundStyle(.secondary)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .voiceMessageDidRequireWarning)) { _ in
@@ -205,11 +180,7 @@ struct ChatView: View {
                     onRemove: {
                         withAnimation {
                             viewModel.clearPendingMedia()
-                            showMediaPreview = false
                         }
-                    },
-                    onTap: {
-                        withAnimation { showMediaPreview = true }
                     }
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -265,7 +236,18 @@ struct ChatView: View {
 
                     Button {
                         let trimmed = viewModel.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if trimmed.isEmpty {
+                        if viewModel.pendingMedia != nil {
+                            Task {
+                                await viewModel.sendPendingMedia()
+                                if !trimmed.isEmpty {
+                                    await viewModel.sendMessage()
+                                }
+                                await MainActor.run {
+                                    inputFocused = false
+                                    scrollToBottom(delayed: true)
+                                }
+                            }
+                        } else if trimmed.isEmpty {
                             Task {
                                 await viewModel.startVoiceRecording()
                             }
@@ -279,10 +261,12 @@ struct ChatView: View {
                             }
                         }
                     } label: {
+                        let hasPending = viewModel.pendingMedia != nil
                         let isTyping = !viewModel.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        Image(systemName: isTyping ? "paperplane.fill" : "mic.fill")
+                        let shouldShowSend = hasPending || isTyping
+                        Image(systemName: shouldShowSend ? "paperplane.fill" : "mic.fill")
                             .imageScale(.large)
-                            .foregroundStyle(isTyping ? .blue : .secondary)
+                            .foregroundStyle(shouldShowSend ? .blue : .secondary)
                     }
                     .disabled(viewModel.isSending)
                 }
@@ -579,7 +563,6 @@ private struct PendingMediaBanner: View {
     let pending: ChatViewModel.PendingMedia
     let viewModel: ChatViewModel
     let onRemove: () -> Void
-    let onTap: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -599,9 +582,11 @@ private struct PendingMediaBanner: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(pending.type.previewText)
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.white)
+                if pending.type == .voice {
+                    Text(pending.type.previewText)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.white)
+                }
 
                 if let duration = pending.duration, pending.type == .voice {
                     Text(Formatter.format(duration: duration))
@@ -612,7 +597,7 @@ private struct PendingMediaBanner: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Tap to preview")
+                    Text("Ready to send")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -628,7 +613,6 @@ private struct PendingMediaBanner: View {
         .padding(12)
         .background(Color.white.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .onTapGesture(perform: onTap)
     }
 }
 
@@ -916,81 +900,6 @@ private struct OverlappingStatusAvatars: View {
                 Circle()
                     .stroke(Color.blue.opacity(0.4), lineWidth: 0.5)
             )
-    }
-}
-
-private struct MediaSendPreview: View {
-    let pending: ChatViewModel.PendingMedia
-    let viewModel: ChatViewModel
-    let onSend: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Group {
-                switch pending.type {
-                case .image:
-                    if let image = viewModel.thumbnailImage(for: pending) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxHeight: 320)
-                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    } else {
-                        placeholder(icon: "photo", text: "Photo ready to send")
-                    }
-
-                case .voice:
-                    placeholder(icon: "waveform.circle.fill", text: "Voice message ready to send")
-                }
-            }
-
-            Text(description)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 16) {
-                Button(role: .destructive, action: onCancel) {
-                    Label("Cancel", systemImage: "xmark")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-
-                Button(action: onSend) {
-                    Label("Send", systemImage: "paperplane.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(24)
-    }
-
-    private func placeholder(icon: String, text: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 60, weight: .regular))
-                .foregroundStyle(.blue)
-
-            Text(text)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.primary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color.blue.opacity(0.12))
-        )
-    }
-
-    private var description: String {
-        switch pending.type {
-        case .image:
-            return "Double-check the preview before sending."
-        case .voice:
-            return "Voice messages are limited to 30 seconds and auto-delete after 7 days."
-        }
     }
 }
 
