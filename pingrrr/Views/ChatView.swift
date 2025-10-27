@@ -257,11 +257,11 @@ struct ChatView: View {
                             let oldTrimmed = oldValue.trimmingCharacters(in: .whitespacesAndNewlines)
                             let newTrimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                            if oldTrimmed.isEmpty && !newTrimmed.isEmpty {
-                                // User started typing
+                            if !newTrimmed.isEmpty {
+                                // User is typing (has text) - reset typing indicator
                                 viewModel.userStartedTyping()
                             } else if !oldTrimmed.isEmpty && newTrimmed.isEmpty {
-                                // User stopped typing
+                                // User stopped typing (cleared all text)
                                 viewModel.userStoppedTyping()
                             }
                         }
