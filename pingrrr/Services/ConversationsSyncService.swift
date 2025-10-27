@@ -137,6 +137,7 @@ final class ConversationsSyncService {
                 entity.hiddenForUserIDs = record.hiddenForUserIDs
 
                 ensureMessageListener(for: identifier, title: entity.title, lastMessageID: entity.lastMessageID)
+                updateTranslationPreference(for: identifier, record: record, in: modelContext)
             case .removed:
                 let identifier = change.document.documentID
                 if let entity = existingMap[identifier] {
@@ -206,6 +207,7 @@ final class ConversationsSyncService {
             entity.hiddenForUserIDs = record.hiddenForUserIDs
 
             ensureMessageListener(for: identifier, title: entity.title, lastMessageID: entity.lastMessageID)
+            updateTranslationPreference(for: identifier, record: record, in: modelContext)
         }
 
         for (identifier, entity) in existingMap where !seenIdentifiers.contains(identifier) {
@@ -277,6 +279,31 @@ final class ConversationsSyncService {
     private func removeMessageListener(for conversationID: String) {
         guard let state = messageListeners.removeValue(forKey: conversationID) else { return }
         state.registration?.remove()
+    }
+
+    private func updateTranslationPreference(for conversationID: String, record: ConversationRecord, in context: ModelContext) {
+        guard let currentUserID else { return }
+
+        let descriptor = FetchDescriptor<ConversationPreferenceEntity>(
+            predicate: #Predicate { $0.conversationID == conversationID }
+        )
+
+        let preference: ConversationPreferenceEntity
+        if let existing = try? context.fetch(descriptor).first {
+            preference = existing
+        } else {
+            let newPreference = ConversationPreferenceEntity(conversationID: conversationID)
+            context.insert(newPreference)
+            preference = newPreference
+        }
+
+        if let remote = record.translationPreferences?[currentUserID] {
+            preference.autoTranslateEnabled = remote.enabled ?? false
+            preference.nativeLanguageCode = remote.native
+            preference.targetLanguageCode = remote.target
+        } else {
+            preference.autoTranslateEnabled = false
+        }
     }
 
     private func handleIncomingMessage(
@@ -383,6 +410,7 @@ private struct ConversationRecord: Codable {
     var lastMessageSenderID: String?
     var senderDisplayName: String?
     var hiddenForUserIDs: [String]
+    var translationPreferences: [String: TranslationPreferenceRecord]?
 
     var type: ConversationType? {
         guard let typeRawValue else { return nil }
@@ -405,7 +433,8 @@ private struct ConversationRecord: Codable {
         createdAt: Date? = nil,
         lastMessageSenderID: String? = nil,
         senderDisplayName: String? = nil,
-        hiddenForUserIDs: [String] = []
+        hiddenForUserIDs: [String] = [],
+        translationPreferences: [String: TranslationPreferenceRecord]? = nil
     ) {
         self.id = id
         self.title = title
@@ -419,6 +448,7 @@ private struct ConversationRecord: Codable {
         self.lastMessageSenderID = lastMessageSenderID
         self.senderDisplayName = senderDisplayName
         self.hiddenForUserIDs = hiddenForUserIDs
+        self.translationPreferences = translationPreferences
     }
 
     init(from decoder: Decoder) throws {
@@ -453,6 +483,7 @@ private struct ConversationRecord: Codable {
         lastMessageSenderID = try container.decodeIfPresent(String.self, forKey: .lastMessageSenderID)
         senderDisplayName = try container.decodeIfPresent(String.self, forKey: .senderDisplayName)
         hiddenForUserIDs = (try? container.decodeIfPresent([String].self, forKey: .hiddenForUserIDs)) ?? []
+        translationPreferences = try container.decodeIfPresent([String: TranslationPreferenceRecord].self, forKey: .translationPreferences)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -467,6 +498,13 @@ private struct ConversationRecord: Codable {
         case lastMessageSenderID = "lastMessageSenderID"
         case senderDisplayName = "senderDisplayName"
         case hiddenForUserIDs = "hiddenFor"
+        case translationPreferences = "translationPreferences"
     }
+}
+
+private struct TranslationPreferenceRecord: Codable {
+    var enabled: Bool?
+    var native: String?
+    var target: String?
 }
 

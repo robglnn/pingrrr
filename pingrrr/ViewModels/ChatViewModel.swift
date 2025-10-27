@@ -61,6 +61,9 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var pendingMedia: PendingMedia?
     @Published private(set) var presenceSnapshot: PresenceService.Snapshot?
     @Published private(set) var isAIProcessingTranslation = false
+    @Published private(set) var autoTranslateEnabled = false
+    @Published private(set) var autoTranslateNativeLanguage: TranslationLanguage = TranslationLanguage.supported.first(where: { $0.code == "en" }) ?? TranslationLanguage.supported.first!
+    @Published private(set) var autoTranslateTargetLanguage: TranslationLanguage = TranslationLanguage.supported.first(where: { $0.code == "es" }) ?? TranslationLanguage.supported.first!
 
     private var translationCache: [String: String] = [:]
     private var translationVisibility: [String: Bool] = [:]
@@ -68,6 +71,8 @@ final class ChatViewModel: ObservableObject {
     private var aiBusyMessageIDs: Set<String> = []
     private var aiProcessingFlag = false
     private var profilePrefetchTask: Task<Void, Never>?
+    private var autoTranslationTasks: [String: Task<Void, Never>] = [:]
+    private var conversationPreference: ConversationPreferenceEntity?
 
     var aiIsProcessingTranslation: Bool {
         isAIProcessingTranslation
@@ -78,6 +83,11 @@ final class ChatViewModel: ObservableObject {
     }
 
     private var cancellables: Set<AnyCancellable> = []
+    private static let broadcastTranslationKey = "broadcast"
+
+    var supportedTranslationLanguages: [TranslationLanguage] {
+        TranslationLanguage.supported
+    }
 
     init(
         conversation: ConversationEntity,
@@ -90,6 +100,7 @@ final class ChatViewModel: ObservableObject {
         self.modelContext = modelContext
         self.appServices = appServices
         self.conversation = conversation
+        loadTranslationPreferenceFromStore()
         loadCachedMessages()
         refreshConversationReference()
 
@@ -143,6 +154,7 @@ final class ChatViewModel: ObservableObject {
         typingTimeoutWorkItem = nil
         NotificationService.shared.clearCurrentChatID()
         removePresenceObservers()
+        cancelPendingAutoTranslationTasks()
     }
 
     func refresh() async {
@@ -159,9 +171,53 @@ final class ChatViewModel: ObservableObject {
         draftMessage = ""
     }
 
-    func toggleInlineTranslation() async {
-        guard let lastMessage = messages.last else { return }
-        await toggleTranslation(for: lastMessage)
+    func toggleAutoTranslate() async {
+        autoTranslateEnabled.toggle()
+        conversationPreference?.autoTranslateEnabled = autoTranslateEnabled
+        try? modelContext.save()
+
+        if autoTranslateEnabled {
+            applyAutoTranslationToCachedMessages(force: true)
+        } else {
+            cancelPendingAutoTranslationTasks()
+        }
+
+        await persistTranslationPreference()
+    }
+
+    func updateAutoTranslateLanguages(native: TranslationLanguage, target: TranslationLanguage) async {
+        autoTranslateNativeLanguage = native
+        autoTranslateTargetLanguage = target
+
+        conversationPreference?.nativeLanguageCode = native.code
+        conversationPreference?.targetLanguageCode = target.code
+        try? modelContext.save()
+
+        if autoTranslateEnabled {
+            cancelPendingAutoTranslationTasks()
+            applyAutoTranslationToCachedMessages(force: true)
+        }
+
+        await persistTranslationPreference()
+    }
+
+    var isAutoTranslateActive: Bool {
+        autoTranslateEnabled
+    }
+
+    func translationForDisplay(of message: MessageEntity) -> MessageAutoTranslation? {
+        guard autoTranslateEnabled else { return nil }
+
+        if let personal = message.autoTranslations[currentUserID] {
+            return personal
+        }
+
+        if let broadcast = message.autoTranslations[Self.broadcastTranslationKey],
+           broadcast.targetLanguageCode == autoTranslateNativeLanguage.code {
+            return broadcast
+        }
+
+        return nil
     }
 
     func toggleTranslation(for messageID: String?) async {
@@ -403,6 +459,7 @@ final class ChatViewModel: ObservableObject {
         var optimisticMediaURL: String? = nil
         var optimisticMediaType: MessageMediaType? = nil
         var optimisticDuration: TimeInterval? = nil
+        var outgoingTranslations: [String: MessageAutoTranslation] = [:]
 
         if case let .media(data, mediaType, duration) = request {
             optimisticDuration = duration
@@ -413,6 +470,14 @@ final class ChatViewModel: ObservableObject {
             } catch {
                 errorMessage = error.localizedDescription
                 return
+            }
+        } else if case let .text(text) = request, autoTranslateEnabled {
+            isAIProcessingTranslation = true
+            defer { isAIProcessingTranslation = false }
+            do {
+                outgoingTranslations = try await prepareOutgoingAutoTranslations(for: text)
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
 
@@ -430,7 +495,8 @@ final class ChatViewModel: ObservableObject {
             retryCount: 0,
             nextRetryTimestamp: nil,
             mediaURL: optimisticMediaURL,
-            mediaType: optimisticMediaType
+            mediaType: optimisticMediaType,
+            autoTranslations: outgoingTranslations
         )
         optimisticMessage.voiceDuration = optimisticDuration
 
@@ -472,6 +538,23 @@ final class ChatViewModel: ObservableObject {
             if let duration = message.voiceDuration {
                 payload["voiceDuration"] = duration
             }
+        }
+
+        if !message.autoTranslations.isEmpty {
+            var translationsPayload: [String: Any] = [:]
+            for (key, translation) in message.autoTranslations {
+                var entry: [String: Any] = [
+                    "text": translation.text,
+                    "targetLanguageCode": translation.targetLanguageCode,
+                    "authorID": translation.authorID,
+                    "updatedAt": Timestamp(date: translation.updatedAt)
+                ]
+                if let source = translation.sourceLanguageCode {
+                    entry["sourceLanguageCode"] = source
+                }
+                translationsPayload[key] = entry
+            }
+            payload["autoTranslations"] = translationsPayload
         }
 
         return payload
@@ -562,6 +645,7 @@ final class ChatViewModel: ObservableObject {
         NotificationService.shared.clearCurrentChatID()
         profilePrefetchTask?.cancel()
         profilePrefetchTask = nil
+        cancelPendingAutoTranslationTasks()
     }
 
     func loadCachedMessages() {
@@ -579,6 +663,8 @@ final class ChatViewModel: ObservableObject {
         regroupMessages()
         updateReadReceiptProfiles()
         refreshConversationReference()
+        loadTranslationPreferenceFromStore()
+        applyAutoTranslationToCachedMessages()
         Task { await markMessagesAsRead() }
     }
 
@@ -594,6 +680,177 @@ final class ChatViewModel: ObservableObject {
         } else {
             print("[ChatViewModel] No conversation entity found locally for \(conversationID)")
         }
+    }
+
+    private func loadTranslationPreferenceFromStore() {
+        let descriptor = FetchDescriptor<ConversationPreferenceEntity>(
+            predicate: #Predicate { $0.conversationID == conversationID }
+        )
+
+        if let preference = try? modelContext.fetch(descriptor).first {
+            conversationPreference = preference
+        } else {
+            let preference = ConversationPreferenceEntity(conversationID: conversationID)
+            modelContext.insert(preference)
+            conversationPreference = preference
+            try? modelContext.save()
+        }
+
+        if let preference = conversationPreference {
+            if preference.nativeLanguageCode == nil {
+                preference.nativeLanguageCode = autoTranslateNativeLanguage.code
+            }
+            if preference.targetLanguageCode == nil {
+                preference.targetLanguageCode = autoTranslateTargetLanguage.code
+            }
+            applyTranslationPreference(preference)
+            try? modelContext.save()
+        }
+    }
+
+    private func applyTranslationPreference(_ preference: ConversationPreferenceEntity) {
+        autoTranslateEnabled = preference.autoTranslateEnabled
+        if let native = TranslationLanguage.language(for: preference.nativeLanguageCode) {
+            autoTranslateNativeLanguage = native
+        }
+        if let target = TranslationLanguage.language(for: preference.targetLanguageCode) {
+            autoTranslateTargetLanguage = target
+        }
+    }
+
+    private func applyAutoTranslationToCachedMessages(force: Bool = false) {
+        guard autoTranslateEnabled else { return }
+        for message in messages {
+            scheduleAutoTranslation(for: message, force: force)
+        }
+    }
+
+    private func scheduleAutoTranslation(for message: MessageEntity, force: Bool) {
+        guard autoTranslateEnabled else { return }
+        guard message.senderID != currentUserID else { return }
+        guard message.mediaType == nil else { return }
+        guard message.mediaURL == nil else { return }
+
+        if !force {
+            if let existing = message.autoTranslations[currentUserID],
+               existing.targetLanguageCode == autoTranslateNativeLanguage.code {
+                return
+            }
+            if let broadcast = message.autoTranslations[Self.broadcastTranslationKey],
+               broadcast.targetLanguageCode == autoTranslateNativeLanguage.code {
+                return
+            }
+        }
+
+        if autoTranslationTasks[message.id] != nil {
+            return
+        }
+
+        autoTranslationTasks[message.id] = Task { @MainActor [weak self, weak message] in
+            guard let self, let message else { return }
+            do {
+                let translated = try await AIService.shared.translate(
+                    text: message.content,
+                    targetLang: self.autoTranslateNativeLanguage.code,
+                    formality: self.aiPreferences.defaultFormality
+                )
+                if Task.isCancelled { return }
+
+                let payload = MessageAutoTranslation(
+                    text: translated,
+                    sourceLanguageCode: nil,
+                    targetLanguageCode: self.autoTranslateNativeLanguage.code,
+                    authorID: self.currentUserID,
+                    updatedAt: Date()
+                )
+
+                message.autoTranslations[self.currentUserID] = payload
+                try? self.modelContext.save()
+                self.regroupMessages()
+                await self.persistAutoTranslation(payload, for: message, key: self.currentUserID)
+            } catch {
+                if !Task.isCancelled {
+                    self.errorMessage = error.localizedDescription
+                }
+            }
+            self.autoTranslationTasks[message.id] = nil
+        }
+    }
+
+    private func cancelPendingAutoTranslationTasks() {
+        for (_, task) in autoTranslationTasks {
+            task.cancel()
+        }
+        autoTranslationTasks.removeAll()
+    }
+
+    private func persistAutoTranslation(_ translation: MessageAutoTranslation, for message: MessageEntity, key: String) async {
+        let docRef = Firestore.firestore()
+            .collection("conversations")
+            .document(conversationID)
+            .collection("messages")
+            .document(message.id)
+
+        var entry: [String: Any] = [
+            "text": translation.text,
+            "targetLanguageCode": translation.targetLanguageCode,
+            "authorID": translation.authorID,
+            "updatedAt": Timestamp(date: translation.updatedAt)
+        ]
+
+        if let source = translation.sourceLanguageCode {
+            entry["sourceLanguageCode"] = source
+        }
+
+        do {
+            try await docRef.setData([
+                "autoTranslations.\(key)": entry
+            ], merge: true)
+        } catch {
+            if !Task.isCancelled {
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func persistTranslationPreference() async {
+        let docRef = Firestore.firestore().collection("conversations").document(conversationID)
+        let payload: [String: Any] = [
+            "enabled": autoTranslateEnabled,
+            "native": autoTranslateNativeLanguage.code,
+            "target": autoTranslateTargetLanguage.code
+        ]
+
+        do {
+            try await docRef.setData([
+                "translationPreferences.\(currentUserID)": payload
+            ], merge: true)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func prepareOutgoingAutoTranslations(for text: String) async throws -> [String: MessageAutoTranslation] {
+        let translated = try await AIService.shared.translate(
+            text: text,
+            targetLang: autoTranslateTargetLanguage.code,
+            formality: aiPreferences.defaultFormality
+        )
+
+        let payload = MessageAutoTranslation(
+            text: translated,
+            sourceLanguageCode: autoTranslateNativeLanguage.code,
+            targetLanguageCode: autoTranslateTargetLanguage.code,
+            authorID: currentUserID,
+            updatedAt: Date()
+        )
+
+        var map: [String: MessageAutoTranslation] = [
+            Self.broadcastTranslationKey: payload,
+            currentUserID: payload
+        ]
+
+        return map
     }
 
     private func updateConversationForOutgoingMessage(content: String, timestamp: Date, messageID: String) {

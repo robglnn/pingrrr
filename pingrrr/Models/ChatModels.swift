@@ -170,6 +170,28 @@ enum MessageMediaType: String, Codable, CaseIterable, Sendable {
     case voice
 }
 
+struct MessageAutoTranslation: Codable, Equatable, Sendable {
+    var text: String
+    var sourceLanguageCode: String?
+    var targetLanguageCode: String
+    var authorID: String
+    var updatedAt: Date
+
+    init(
+        text: String,
+        sourceLanguageCode: String?,
+        targetLanguageCode: String,
+        authorID: String,
+        updatedAt: Date = Date()
+    ) {
+        self.text = text
+        self.sourceLanguageCode = sourceLanguageCode
+        self.targetLanguageCode = targetLanguageCode
+        self.authorID = authorID
+        self.updatedAt = updatedAt
+    }
+}
+
 extension MessageMediaType {
     var fileExtension: String {
         switch self {
@@ -211,6 +233,7 @@ final class MessageEntity {
     var mediaURL: String?
     var mediaTypeRawValue: String?
     var voiceDurationSeconds: Double?
+    var autoTranslationsString: String = MessageEntity.encodeAutoTranslations([:])
 
     // Temporarily removing relationship for build compatibility
     // @Relationship(deleteRule: .nullify, inverse: \ConversationEntity.messages)
@@ -231,7 +254,8 @@ final class MessageEntity {
         nextRetryTimestamp: Date? = nil,
         mediaURL: String? = nil,
         mediaType: MessageMediaType? = nil,
-        voiceDurationSeconds: Double? = nil
+        voiceDurationSeconds: Double? = nil,
+        autoTranslations: [String: MessageAutoTranslation] = [:]
     ) {
         self.id = id
         self.conversationID = conversationID
@@ -248,6 +272,7 @@ final class MessageEntity {
         self.mediaURL = mediaURL
         self.mediaTypeRawValue = mediaType?.rawValue
         self.voiceDurationSeconds = voiceDurationSeconds
+        self.autoTranslationsString = MessageEntity.encodeAutoTranslations(autoTranslations)
     }
 
     var status: MessageStatus {
@@ -285,6 +310,11 @@ final class MessageEntity {
         set { voiceDurationSeconds = newValue }
     }
 
+    var autoTranslations: [String: MessageAutoTranslation] {
+        get { MessageEntity.decodeAutoTranslations(autoTranslationsString) }
+        set { autoTranslationsString = MessageEntity.encodeAutoTranslations(newValue) }
+    }
+
     static func encodeIDs(_ ids: [String]) -> String {
         guard let data = try? JSONEncoder().encode(ids),
               let string = String(data: data, encoding: .utf8) else {
@@ -308,6 +338,24 @@ extension MessageEntity {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
+
+    static func encodeAutoTranslations(_ map: [String: MessageAutoTranslation]) -> String {
+        guard !map.isEmpty else { return "{}" }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(map),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return string
+    }
+
+    static func decodeAutoTranslations(_ string: String) -> [String: MessageAutoTranslation] {
+        guard let data = string.data(using: .utf8) else { return [:] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([String: MessageAutoTranslation].self, from: data)) ?? [:]
+    }
 
     static func encodeTimestampMap(_ map: [String: Date]) -> String {
         guard !map.isEmpty else { return "{}" }
@@ -340,10 +388,22 @@ extension MessageEntity {
 final class ConversationPreferenceEntity {
     @Attribute(.unique) var conversationID: String
     var isHidden: Bool
+    var autoTranslateEnabled: Bool
+    var nativeLanguageCode: String?
+    var targetLanguageCode: String?
 
-    init(conversationID: String, isHidden: Bool = false) {
+    init(
+        conversationID: String,
+        isHidden: Bool = false,
+        autoTranslateEnabled: Bool = false,
+        nativeLanguageCode: String? = nil,
+        targetLanguageCode: String? = nil
+    ) {
         self.conversationID = conversationID
         self.isHidden = isHidden
+        self.autoTranslateEnabled = autoTranslateEnabled
+        self.nativeLanguageCode = nativeLanguageCode
+        self.targetLanguageCode = targetLanguageCode
     }
 }
 

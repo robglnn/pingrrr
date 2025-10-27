@@ -20,6 +20,8 @@ struct ChatView: View {
     @State private var showVoiceWarning = false
     @State private var scrollProxy: ScrollViewProxy?
     @State private var pendingScrollWorkItem: DispatchWorkItem?
+    @State private var showingTranslationSettings = false
+    @State private var suppressGlobeToggle = false
 
     init(conversation: ConversationEntity, currentUserID: String, modelContext: ModelContext, appServices: AppServices) {
         self.conversation = conversation
@@ -71,6 +73,15 @@ struct ChatView: View {
                     viewModel.clearPendingMedia()
                     showMediaSheet = false
                 }
+            }
+        }
+        .sheet(isPresented: $showingTranslationSettings) {
+            AutoTranslateSettingsView(
+                languages: viewModel.supportedTranslationLanguages,
+                native: viewModel.autoTranslateNativeLanguage,
+                target: viewModel.autoTranslateTargetLanguage
+            ) { native, target in
+                Task { await viewModel.updateAutoTranslateLanguages(native: native, target: target) }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .voiceMessageDidRequireWarning)) { _ in
@@ -215,15 +226,21 @@ struct ChatView: View {
                     }
 
                     Button {
-                        Task {
-                            await viewModel.toggleInlineTranslation()
+                        if suppressGlobeToggle {
+                            suppressGlobeToggle = false
+                            return
                         }
+                        Task { await viewModel.toggleAutoTranslate() }
                     } label: {
                         Image(systemName: "globe")
                             .imageScale(.medium)
-                            .foregroundStyle(viewModel.aiIsProcessingTranslation ? .blue : .secondary)
+                            .foregroundStyle(viewModel.isAutoTranslateActive ? .blue : .secondary)
                     }
                     .disabled(viewModel.aiIsProcessingTranslation)
+                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.6).onEnded { _ in
+                        suppressGlobeToggle = true
+                        showingTranslationSettings = true
+                    })
 
                     TextField("Type a message...", text: $viewModel.draftMessage, axis: .vertical)
                         .focused($inputFocused)
@@ -291,6 +308,61 @@ struct ChatView: View {
             .padding(.bottom, 4)
         }
     }
+
+private struct AutoTranslateSettingsView: View {
+    let languages: [TranslationLanguage]
+    let onUpdate: (TranslationLanguage, TranslationLanguage) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedNative: TranslationLanguage
+    @State private var selectedTarget: TranslationLanguage
+
+    init(
+        languages: [TranslationLanguage],
+        native: TranslationLanguage,
+        target: TranslationLanguage,
+        onUpdate: @escaping (TranslationLanguage, TranslationLanguage) -> Void
+    ) {
+        self.languages = languages
+        self._selectedNative = State(initialValue: native)
+        self._selectedTarget = State(initialValue: target)
+        self.onUpdate = onUpdate
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Your Language") {
+                    Picker("Native", selection: $selectedNative) {
+                        ForEach(languages) { language in
+                            Text(language.name).tag(language)
+                        }
+                    }
+                }
+
+                Section("Translate To") {
+                    Picker("Target", selection: $selectedTarget) {
+                        ForEach(languages) { language in
+                            Text(language.name).tag(language)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Auto Translate")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onUpdate(selectedNative, selectedTarget)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
 }
 
 private struct MessageRowView: View {
@@ -317,22 +389,7 @@ private struct MessageRowView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                messageBubble
-
-                if let translated = item.message.translatedContent, item.showTranslation {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Translated")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text(translated)
-                            .font(.body)
-                            .foregroundStyle(.green)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+        messageBubble
 
                 if let insight = item.insight {
                     insightBubble(for: insight)
@@ -383,6 +440,25 @@ private struct MessageRowView: View {
     }
 
     private var messageBubble: some View {
+        VStack(alignment: item.isCurrentUser ? .trailing : .leading, spacing: 6) {
+            primaryBubble
+            if let manual = manualTranslationText {
+                translationBlock(text: manual, label: "Translated")
+            } else if let auto = autoTranslationPayload {
+                translationBlock(text: auto.text, label: translationLabel(for: auto))
+            }
+        }
+    }
+
+    private var bubbleBackground: some ShapeStyle {
+        if item.isCurrentUser {
+            return AnyShapeStyle(Color.blue.opacity(0.9))
+        } else {
+            return AnyShapeStyle(Color.white.opacity(0.08))
+        }
+    }
+
+    private var primaryBubble: some View {
         Group {
             if let mediaType = item.message.mediaType, let mediaURL = item.message.mediaURL {
                 MediaBubbleView(
@@ -412,12 +488,36 @@ private struct MessageRowView: View {
         }
     }
 
-    private var bubbleBackground: some ShapeStyle {
-        if item.isCurrentUser {
-            return AnyShapeStyle(Color.blue.opacity(0.9))
-        } else {
-            return AnyShapeStyle(Color.white.opacity(0.08))
+    private var autoTranslationPayload: MessageAutoTranslation? {
+        viewModel.translationForDisplay(of: item.message)
+    }
+
+    private var manualTranslationText: String? {
+        guard item.showTranslation else { return nil }
+        return item.message.translatedContent
+    }
+
+    private func translationLabel(for payload: MessageAutoTranslation) -> String {
+        if let language = TranslationLanguage.language(for: payload.targetLanguageCode) {
+            return "Translated (\(language.name))"
         }
+        return "Translated (\(payload.targetLanguageCode.uppercased()))"
+    }
+
+    @ViewBuilder
+    private func translationBlock(text: String, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.body)
+                .foregroundStyle(.green)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder

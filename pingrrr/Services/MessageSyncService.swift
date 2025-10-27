@@ -152,6 +152,10 @@ final class MessageSyncService {
         }
         entity.voiceDuration = record.voiceDuration
 
+        if let autoTranslations = record.autoTranslations {
+            entity.autoTranslations = autoTranslations
+        }
+
         if let timestamp = record.timestamp {
             entity.timestamp = timestamp
         }
@@ -377,7 +381,10 @@ private struct MessageRecord: Codable {
         case mediaURL
         case mediaType
         case voiceDuration
+        case autoTranslations
     }
+
+    var autoTranslations: [String: MessageAutoTranslation]?
 
     init(
         id: String? = nil,
@@ -391,7 +398,8 @@ private struct MessageRecord: Codable {
         readTimestamps: [String: Date]? = nil,
         unreadCounts: [String: Int]? = nil,
         mediaURL: String? = nil,
-        mediaType: MessageMediaType? = nil
+        mediaType: MessageMediaType? = nil,
+        autoTranslations: [String: MessageAutoTranslation]? = nil
     ) {
         self.id = id
         self.conversationID = conversationID
@@ -405,5 +413,6 @@ private struct MessageRecord: Codable {
         self.unreadCounts = unreadCounts
         self.mediaURL = mediaURL
         self.mediaType = mediaType?.rawValue
+        self.autoTranslations = autoTranslations
     }
 }
