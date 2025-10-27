@@ -261,18 +261,14 @@ private struct ConversationRow: View {
                     }
 
                     Spacer()
-
-                    if let timestamp = conversation.lastMessageTimestamp {
-                        Text(Formatter.relativeDateFormatter.localizedString(for: timestamp, relativeTo: Date()))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
                 }
 
-                Text(previewText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                if let preview = previewText {
+                    Text(preview)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
 
             if conversation.unreadCount > 0 {
@@ -310,7 +306,7 @@ private struct ConversationRow: View {
             .foregroundStyle(.white)
     }
 
-    private var previewText: String {
+    private var previewText: String? {
         if let message = lastMessage {
             if message.mediaType != nil || !(message.mediaURL ?? "").isEmpty {
                 return "Media received"
@@ -326,7 +322,7 @@ private struct ConversationRow: View {
             return preview
         }
 
-        return "No messages yet"
+        return nil
     }
 
     private var lastMessage: MessageEntity? {

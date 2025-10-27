@@ -366,26 +366,28 @@ private struct MessageRowView: View {
             }
             .frame(maxWidth: UIScreen.main.bounds.width * 0.72, alignment: item.isCurrentUser ? .trailing : .leading)
             .contextMenu {
-                Button("Translate") {
-                    Task { await viewModel.toggleTranslation(for: item.id) }
-                }
-                Button("Explain Slang") {
-                    Task { await viewModel.explainSlang(for: item.id) }
-                }
-                Button("Cultural Hint") {
-                    Task { await viewModel.culturalHint(for: item.id) }
-                }
-                Button("Adjust Tone") {
-                    Task { await viewModel.adjustTone(for: item.id) }
-                }
-                if item.insight != nil {
-                    Button("Remove Insight") {
-                        viewModel.removeInsight(for: item.id)
+                if item.message.mediaType == nil && item.message.mediaURL == nil {
+                    Button("Translate") {
+                        Task { await viewModel.toggleTranslation(for: item.id) }
                     }
-                }
-                if let translated = item.message.translatedContent {
-                    Button("Copy Translation") {
-                        UIPasteboard.general.string = translated
+                    Button("Explain Slang") {
+                        Task { await viewModel.explainSlang(for: item.id) }
+                    }
+                    Button("Cultural Hint") {
+                        Task { await viewModel.culturalHint(for: item.id) }
+                    }
+                    Button("Adjust Tone") {
+                        Task { await viewModel.adjustTone(for: item.id) }
+                    }
+                    if item.insight != nil {
+                        Button("Remove Insight") {
+                            viewModel.removeInsight(for: item.id)
+                        }
+                    }
+                    if let translated = item.message.translatedContent {
+                        Button("Copy Translation") {
+                            UIPasteboard.general.string = translated
+                        }
                     }
                 }
             }
