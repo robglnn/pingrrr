@@ -253,6 +253,18 @@ struct ChatView: View {
                         .padding(.horizontal, 12)
                         .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
                         .lineLimit(1...4)
+                        .onChange(of: viewModel.draftMessage) { oldValue, newValue in
+                            let oldTrimmed = oldValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let newTrimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                            if oldTrimmed.isEmpty && !newTrimmed.isEmpty {
+                                // User started typing
+                                viewModel.userStartedTyping()
+                            } else if !oldTrimmed.isEmpty && newTrimmed.isEmpty {
+                                // User stopped typing
+                                viewModel.userStoppedTyping()
+                            }
+                        }
 
                     Button {
                         let trimmed = viewModel.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -478,7 +490,7 @@ private struct MessageRowView: View {
                     viewModel: viewModel
                 )
             } else {
-                Text(item.message.content)
+                Text(bubbleText)
                     .font(.body)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
@@ -495,6 +507,13 @@ private struct MessageRowView: View {
                     .padding(6)
             }
         }
+    }
+
+    private var bubbleText: String {
+        if item.isCurrentUser, let original = item.message.originalContent, !original.isEmpty {
+            return original
+        }
+        return item.message.content
     }
 
     private var autoTranslationPayload: MessageAutoTranslation? {

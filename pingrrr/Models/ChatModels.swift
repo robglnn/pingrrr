@@ -223,6 +223,7 @@ final class MessageEntity {
     var senderID: String
     var content: String
     var translatedContent: String?
+    var originalContent: String?
     var timestamp: Date
     var statusRawValue: String
     var readByString: String // Store as JSON string for now
@@ -245,6 +246,7 @@ final class MessageEntity {
         senderID: String,
         content: String,
         translatedContent: String? = nil,
+        originalContent: String? = nil,
         timestamp: Date,
         status: MessageStatus,
         readBy: [String] = [],
@@ -262,6 +264,7 @@ final class MessageEntity {
         self.senderID = senderID
         self.content = content
         self.translatedContent = translatedContent
+        self.originalContent = originalContent
         self.timestamp = timestamp
         self.statusRawValue = status.rawValue
         self.readByString = MessageEntity.encodeIDs(readBy)

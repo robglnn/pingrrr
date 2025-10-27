@@ -213,12 +213,22 @@ final class ChatViewModel: ObservableObject {
         autoTranslateEnabled
     }
 
-    func translationForDisplay(of message: MessageEntity, isCurrentUser _: Bool) -> MessageAutoTranslation? {
+    func translationForDisplay(of message: MessageEntity, isCurrentUser: Bool) -> MessageAutoTranslation? {
+        guard autoTranslateEnabled else { return nil }
+
+        if isCurrentUser {
+            if let broadcast = message.autoTranslations[Self.broadcastTranslationKey] {
+                return broadcast
+            }
+            return message.autoTranslations[currentUserID]
+        }
+
         if let personal = message.autoTranslations[currentUserID] {
             return personal
         }
 
-        if let broadcast = message.autoTranslations[Self.broadcastTranslationKey] {
+        if let broadcast = message.autoTranslations[Self.broadcastTranslationKey],
+           broadcast.targetLanguageCode == autoTranslateNativeLanguage.code {
             return broadcast
         }
 
@@ -560,6 +570,7 @@ final class ChatViewModel: ObservableObject {
         var optimisticMediaType: MessageMediaType? = nil
         var optimisticDuration: TimeInterval? = nil
         var outgoingTranslations: [String: MessageAutoTranslation] = [:]
+        var translatedTextForRecipients: String?
 
         if case let .media(data, mediaType, duration) = request {
             optimisticDuration = duration
@@ -575,7 +586,9 @@ final class ChatViewModel: ObservableObject {
             isAIProcessingTranslation = true
             defer { isAIProcessingTranslation = false }
             do {
-                outgoingTranslations = try await prepareOutgoingAutoTranslations(for: text)
+                let result = try await prepareOutgoingAutoTranslations(for: text)
+                outgoingTranslations = result.translations
+                translatedTextForRecipients = result.translatedText
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -599,6 +612,9 @@ final class ChatViewModel: ObservableObject {
             autoTranslations: skipAutoTranslation ? [:] : outgoingTranslations
         )
         optimisticMessage.voiceDuration = optimisticDuration
+        if let translatedTextForRecipients {
+            optimisticMessage.originalContent = optimisticContent
+        }
 
         modelContext.insert(optimisticMessage)
         messages.append(optimisticMessage)
@@ -626,6 +642,10 @@ final class ChatViewModel: ObservableObject {
             "status": MessageStatus.sent.rawValue,
             "readBy": message.readBy
         ]
+
+        if let original = message.originalContent {
+            payload["originalContent"] = original
+        }
 
         if !message.readTimestamps.isEmpty {
             let map = message.readTimestamps.mapValues { Timestamp(date: $0) }
@@ -655,6 +675,11 @@ final class ChatViewModel: ObservableObject {
                 translationsPayload[key] = entry
             }
             payload["autoTranslations"] = translationsPayload
+        }
+
+        if message.originalContent != nil,
+           let broadcast = message.autoTranslations[Self.broadcastTranslationKey] {
+            payload["content"] = broadcast.text
         }
 
         return payload
@@ -944,7 +969,7 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func prepareOutgoingAutoTranslations(for text: String) async throws -> [String: MessageAutoTranslation] {
+    private func prepareOutgoingAutoTranslations(for text: String) async throws -> OutgoingTranslationResult {
         if autoTranslateActivatedAt == nil {
             autoTranslateActivatedAt = Date()
             conversationPreference?.autoTranslateActivatedAt = autoTranslateActivatedAt
@@ -969,7 +994,7 @@ final class ChatViewModel: ObservableObject {
             currentUserID: payload
         ]
 
-        return map
+        return OutgoingTranslationResult(translations: map, translatedText: translated)
     }
 
     private func updateConversationForOutgoingMessage(content: String, timestamp: Date, messageID: String) {
@@ -1377,6 +1402,11 @@ final class ChatViewModel: ObservableObject {
         let homeLanguage: TranslationLanguage
         let targetLanguage: TranslationLanguage
         let homeText: String
+        let translatedText: String
+    }
+
+    struct OutgoingTranslationResult {
+        let translations: [String: MessageAutoTranslation]
         let translatedText: String
     }
 

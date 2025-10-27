@@ -117,6 +117,7 @@ final class MessageSyncService {
                 senderID: record.senderID ?? "",
                 content: record.content ?? "",
                 translatedContent: record.translatedContent,
+                originalContent: record.originalContent,
                 timestamp: record.timestamp ?? Date(),
                 status: record.status ?? .sent,
                 readBy: record.readBy ?? [],
@@ -142,6 +143,8 @@ final class MessageSyncService {
         if let content = record.content {
             entity.content = content
         }
+
+        entity.originalContent = record.originalContent
 
         entity.translatedContent = record.translatedContent
         entity.mediaURL = record.mediaURL
@@ -358,6 +361,7 @@ private struct MessageRecord: Codable {
     var senderID: String?
     var content: String?
     var translatedContent: String?
+    var originalContent: String?
     var timestamp: Date?
     var status: MessageStatus?
     var readBy: [String]?
@@ -373,6 +377,7 @@ private struct MessageRecord: Codable {
         case senderID
         case content
         case translatedContent
+        case originalContent
         case timestamp
         case status
         case readBy
@@ -392,6 +397,7 @@ private struct MessageRecord: Codable {
         senderID: String? = nil,
         content: String? = nil,
         translatedContent: String? = nil,
+        originalContent: String? = nil,
         timestamp: Date? = nil,
         status: MessageStatus? = nil,
         readBy: [String]? = nil,
@@ -406,6 +412,7 @@ private struct MessageRecord: Codable {
         self.senderID = senderID
         self.content = content
         self.translatedContent = translatedContent
+        self.originalContent = originalContent
         self.timestamp = timestamp
         self.status = status
         self.readBy = readBy
