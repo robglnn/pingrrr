@@ -17,15 +17,8 @@ struct ReadReceiptsView: View {
             } else {
                 ForEach(readEntries, id: \.userID) { entry in
                     HStack(spacing: 12) {
-                        AsyncProfileImageView(
-                            userID: entry.userID,
-                            displayName: entry.displayName,
-                            photoURL: entry.photoURL,
-                            photoVersion: entry.photoVersion,
-                            size: .regular,
-                            showsBorder: true
-                        )
-                        .frame(width: 28, height: 28)
+                        avatar(for: entry)
+                            .frame(width: 28, height: 28)
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.displayName)
@@ -55,8 +48,6 @@ struct ReadReceiptsView: View {
                 return ReadEntry(
                     userID: userID,
                     displayName: profile.displayName,
-                    photoURL: profile.profilePictureURL,
-                    photoVersion: profile.photoVersion,
                     timestamp: readTimestamp
                 )
             }
@@ -66,8 +57,22 @@ struct ReadReceiptsView: View {
     struct ReadEntry {
         let userID: String
         let displayName: String
-        let photoURL: String?
-        let photoVersion: Int
         let timestamp: Date
+    }
+
+    private func avatar(for entry: ReadEntry) -> some View {
+        let initial = entry.displayName.first.map { String($0).uppercased() } ?? "?"
+
+        return Circle()
+            .fill(Color.blue.opacity(0.2))
+            .overlay(
+                Text(initial)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.blue)
+            )
+            .overlay(
+                Circle()
+                    .stroke(Color.blue.opacity(0.4), lineWidth: 0.6)
+            )
     }
 }

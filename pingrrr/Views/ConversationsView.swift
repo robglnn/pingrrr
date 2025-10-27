@@ -235,6 +235,8 @@ private struct AIAssistantRow: View {
 }
 
 private struct ConversationRow: View {
+    @Environment(\.modelContext) private var modelContext
+
     let conversation: ConversationEntity
     let presence: ConversationsViewModel.PresenceViewData
 
@@ -267,7 +269,7 @@ private struct ConversationRow: View {
                     }
                 }
 
-                Text(conversation.lastMessagePreview ?? "No messages yet")
+                Text(previewText)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -306,6 +308,34 @@ private struct ConversationRow: View {
             .padding(6)
             .background(Color.blue, in: Capsule())
             .foregroundStyle(.white)
+    }
+
+    private var previewText: String {
+        if let message = lastMessage {
+            if message.mediaType != nil || !(message.mediaURL ?? "").isEmpty {
+                return "Media received"
+            }
+
+            let trimmedContent = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedContent.isEmpty {
+                return trimmedContent
+            }
+        }
+
+        if let preview = conversation.lastMessagePreview?.trimmingCharacters(in: .whitespacesAndNewlines), !preview.isEmpty {
+            return preview
+        }
+
+        return "No messages yet"
+    }
+
+    private var lastMessage: MessageEntity? {
+        guard let lastID = conversation.lastMessageID else { return nil }
+        var descriptor = FetchDescriptor<MessageEntity>(
+            predicate: #Predicate { $0.id == lastID }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
     }
 }
 

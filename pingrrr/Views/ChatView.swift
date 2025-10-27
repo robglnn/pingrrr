@@ -545,8 +545,6 @@ private struct MessageRowView: View {
                 return ReadReceiptEntry(
                     userID: userID,
                     displayName: profile.displayName,
-                    profilePictureURL: profile.profilePictureURL,
-                    photoVersion: profile.photoVersion,
                     timestamp: timestamp
                 )
             }
@@ -840,7 +838,7 @@ private struct VoiceMessageBubble: View {
 
     private func stopPlayback() {
         player?.stop()
-        player = nil
+        player?.currentTime = 0
         timer?.invalidate()
         timer = nil
         progress = 0
@@ -887,8 +885,6 @@ private struct ReadReceiptEntry: Identifiable {
     let id = UUID()
     let userID: String
     let displayName: String
-    let profilePictureURL: String?
-    let photoVersion: Int
     let timestamp: Date?
 }
 
@@ -898,17 +894,26 @@ private struct OverlappingStatusAvatars: View {
     var body: some View {
         HStack(spacing: -6) {
             ForEach(entries.prefix(3), id: \.id) { entry in
-                AsyncProfileImageView(
-                    userID: entry.userID,
-                    displayName: entry.displayName,
-                    photoURL: entry.profilePictureURL,
-                    photoVersion: entry.photoVersion,
-                    size: .mini,
-                    showsBorder: true
-                )
-                .frame(width: 16, height: 16)
+                avatar(for: entry)
+                    .frame(width: 16, height: 16)
             }
         }
+    }
+
+    private func avatar(for entry: ReadReceiptEntry) -> some View {
+        let initial = entry.displayName.first.map { String($0).uppercased() } ?? "?"
+
+        return Circle()
+            .fill(Color.blue.opacity(0.2))
+            .overlay(
+                Text(initial)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.blue)
+            )
+            .overlay(
+                Circle()
+                    .stroke(Color.blue.opacity(0.4), lineWidth: 0.5)
+            )
     }
 }
 

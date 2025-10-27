@@ -29,7 +29,7 @@ struct NewConversationSheet: View {
                 Section("Participants") {
                     ForEach(Array(participantFields.enumerated()), id: \.offset) { index, _ in
                         HStack(alignment: .center, spacing: 12) {
-                            TextField("Participant email or ID", text: Binding(
+                            TextField("Participant email", text: Binding(
                                 get: { participantFields[index] },
                                 set: { participantFields[index] = $0 }
                             ))
@@ -56,7 +56,7 @@ struct NewConversationSheet: View {
                         }
                     }
 
-                    Text("Add up to \(maxParticipants) participants by email or user ID. Your account is always included.")
+                    Text("Add up to \(maxParticipants) participants by email. Your account is always included.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
