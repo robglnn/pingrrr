@@ -70,9 +70,11 @@ struct AuthenticationFlowView: View {
                     if viewModel.isLoading {
                         ProgressView()
                             .progressViewStyle(.circular)
+                            .tint(.white)
                     }
                     Text(viewModel.mode.actionTitle)
                         .fontWeight(.semibold)
+                        .foregroundColor(.white)
                 }
                 .frame(maxWidth: .infinity)
                 .padding()

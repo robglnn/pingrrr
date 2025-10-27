@@ -58,6 +58,7 @@ final class AppServices: ObservableObject {
         if modelContext !== self.modelContext {
             self.modelContext = modelContext
             outgoingMessageQueue.start(modelContext: modelContext)
+            profileService.configure(modelContext: modelContext)
         }
 
         guard !hasConfigured else { return }
@@ -76,6 +77,7 @@ final class AppServices: ObservableObject {
                     await self.presenceService.updatePresence(isOnline: true)
                     await self.notificationService.refreshFCMToken()
                     self.outgoingMessageQueue.triggerFlush()
+                    await self.profileService.loadCurrentUserProfile(forceRefresh: false)
                     await self.cacheAuthenticatedUser(user)
                 case .unauthenticated:
                     self.sessionState = .unauthenticated

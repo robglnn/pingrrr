@@ -4,6 +4,7 @@ import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
 import SwiftUI
+import SwiftData
 
 @MainActor
 final class ProfileService: ObservableObject {
@@ -13,9 +14,30 @@ final class ProfileService: ObservableObject {
 
     private let db = Firestore.firestore()
     private let storage = Storage.storage()
+private var modelContext: ModelContext?
 
-    func loadCurrentUserProfile() async {
+    func configure(modelContext: ModelContext?) {
+        self.modelContext = modelContext
+
+        guard let userID = Auth.auth().currentUser?.uid, currentUserProfile == nil else { return }
+        if let cached = cachedProfile(userID: userID) {
+            currentUserProfile = cached
+        }
+    }
+
+    func loadCurrentUserProfile(forceRefresh: Bool = false) async {
         guard let userID = Auth.auth().currentUser?.uid else { return }
+
+        if !forceRefresh {
+            if let profile = currentUserProfile, profile.id == userID {
+                return
+            }
+
+            if let cached = cachedProfile(userID: userID) {
+                currentUserProfile = cached
+                return
+            }
+        }
 
         do {
             let document = try await db.collection("users").document(userID).getDocument()
@@ -34,6 +56,7 @@ final class ProfileService: ObservableObject {
             )
 
             currentUserProfile = profile
+            cacheProfileLocally(profile)
         } catch {
             print("[ProfileService] Failed to load profile: \(error)")
         }
@@ -58,7 +81,7 @@ final class ProfileService: ObservableObject {
         )
 
         // Refresh locally cached profile
-        await loadCurrentUserProfile()
+        await loadCurrentUserProfile(forceRefresh: true)
     }
 
     func uploadProfilePicture(_ image: UIImage) async throws -> String {
@@ -95,7 +118,7 @@ final class ProfileService: ObservableObject {
 
         await ProfileImageCache.shared.invalidate(userID: userID)
 
-        await loadCurrentUserProfile()
+        await loadCurrentUserProfile(forceRefresh: true)
 
         return downloadURL.absoluteString
     }
@@ -115,6 +138,54 @@ final class ProfileService: ObservableObject {
             fcmToken: data["fcmToken"] as? String,
             photoVersion: photoVersionValue
         )
+    }
+
+    private func cachedProfile(userID: String) -> UserProfile? {
+        guard let modelContext else { return nil }
+
+        let descriptor = FetchDescriptor<UserEntity>(predicate: #Predicate { $0.id == userID })
+        guard let entity = try? modelContext.fetch(descriptor).first else { return nil }
+
+        return UserProfile(
+            id: entity.id,
+            displayName: entity.displayName,
+            email: entity.email,
+            profilePictureURL: entity.profilePictureURL,
+            onlineStatus: entity.onlineStatus,
+            lastSeen: entity.lastSeen,
+            fcmToken: entity.fcmToken,
+            photoVersion: entity.photoVersion ?? 0
+        )
+    }
+
+    private func cacheProfileLocally(_ profile: UserProfile) {
+        guard let modelContext else { return }
+
+        let descriptor = FetchDescriptor<UserEntity>(predicate: #Predicate { $0.id == profile.id })
+
+        if let existing = try? modelContext.fetch(descriptor).first {
+            existing.displayName = profile.displayName
+            existing.email = profile.email
+            existing.profilePictureURL = profile.profilePictureURL
+            existing.onlineStatus = profile.onlineStatus
+            existing.lastSeen = profile.lastSeen
+            existing.fcmToken = profile.fcmToken
+            existing.photoVersion = profile.photoVersion
+        } else {
+            let entity = UserEntity(
+                id: profile.id,
+                displayName: profile.displayName,
+                email: profile.email,
+                profilePictureURL: profile.profilePictureURL,
+                onlineStatus: profile.onlineStatus,
+                lastSeen: profile.lastSeen,
+                fcmToken: profile.fcmToken,
+                photoVersion: profile.photoVersion
+            )
+            modelContext.insert(entity)
+        }
+
+        try? modelContext.save()
     }
 }
 

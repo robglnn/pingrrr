@@ -7,10 +7,11 @@ struct SettingsSheet: View {
     @State private var isSigningOut = false
     @State private var errorMessage: String?
     @State private var showingProfileEdit = false
-    @StateObject private var profileService = ProfileService()
+    @ObservedObject private var profileService: ProfileService
 
     init(appServices: AppServices, onDismiss: @escaping () -> Void) {
         _appServices = ObservedObject(initialValue: appServices)
+        _profileService = ObservedObject(initialValue: appServices.profileService)
         self.onDismiss = onDismiss
     }
 
@@ -77,7 +78,7 @@ struct SettingsSheet: View {
                 }
             }
             .task {
-                await profileService.loadCurrentUserProfile()
+                await profileService.loadCurrentUserProfile(forceRefresh: false)
             }
         }
         .sheet(isPresented: $showingProfileEdit) {

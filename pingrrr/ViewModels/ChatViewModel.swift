@@ -11,6 +11,8 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var messages: [MessageEntity] = []
     @Published private(set) var displayItems: [MessageDisplayItem] = []
     @Published private(set) var readReceiptProfiles: [String: UserProfile] = [:]
+    @Published private(set) var displayItemsVersion: Int = 0
+    @Published private(set) var readReceiptVersion: Int = 0
     @Published private(set) var isSending = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var isTyping = false
@@ -65,6 +67,7 @@ final class ChatViewModel: ObservableObject {
     private var aiInsights: [String: AIInsight] = [:]
     private var aiBusyMessageIDs: Set<String> = []
     private var aiProcessingFlag = false
+    private var profilePrefetchTask: Task<Void, Never>?
 
     var aiIsProcessingTranslation: Bool {
         isAIProcessingTranslation
@@ -551,10 +554,14 @@ final class ChatViewModel: ObservableObject {
     func userStartedViewingChat() {
         NotificationService.shared.setCurrentChatID(conversationID)
         Task { await markMessagesAsRead() }
+        attemptedProfileFetches.removeAll()
+        prefetchRelevantProfiles()
     }
 
     func userLeftChat() {
         NotificationService.shared.clearCurrentChatID()
+        profilePrefetchTask?.cancel()
+        profilePrefetchTask = nil
     }
 
     func loadCachedMessages() {
@@ -564,6 +571,11 @@ final class ChatViewModel: ObservableObject {
             sortBy: [SortDescriptor(\.timestamp, order: .forward)]
         )
         messages = (try? modelContext.fetch(descriptor)) ?? []
+        let participantIDs = conversation?.participantIDs ?? []
+        let senderIDs = messages.map { $0.senderID }
+        let readReceiptIDs = messages.flatMap { $0.readBy }
+        let cachedIDs = Set(participantIDs).union(senderIDs).union(readReceiptIDs)
+        seedProfilesFromCache(for: cachedIDs)
         regroupMessages()
         updateReadReceiptProfiles()
         refreshConversationReference()
@@ -652,7 +664,7 @@ final class ChatViewModel: ObservableObject {
 
     private func regroupMessages() {
         guard !messages.isEmpty else {
-            displayItems = []
+            applyDisplayItems([])
             return
         }
 
@@ -706,7 +718,7 @@ final class ChatViewModel: ObservableObject {
 
         flushCurrentGroup()
 
-        displayItems = newItems
+        applyDisplayItems(newItems)
 
         if !missingProfiles.isEmpty {
             loadProfilesIfNeeded(for: missingProfiles)
@@ -722,17 +734,27 @@ final class ChatViewModel: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
 
+            var didUpdateProfiles = false
+
             for id in toFetch {
                 do {
                     let profile = try await profileService.fetchUserProfile(userID: id)
+                    let existing = userProfiles[id]
                     userProfiles[id] = profile
+                    if existing == nil ||
+                        existing?.displayName != profile.displayName ||
+                        existing?.profilePictureURL != profile.profilePictureURL ||
+                        existing?.photoVersion != profile.photoVersion {
+                        didUpdateProfiles = true
+                    }
                 } catch {
                     print("[ChatViewModel] Failed to load profile for \(id): \(error)")
                 }
             }
-
-            regroupMessages()
-            updateReadReceiptProfiles()
+            if didUpdateProfiles {
+                regroupMessages()
+                updateReadReceiptProfiles()
+            }
         }
     }
 
@@ -742,26 +764,139 @@ final class ChatViewModel: ObservableObject {
 
     private func updateReadReceiptProfiles() {
         var map: [String: UserProfile] = [:]
+        var missing: Set<String> = []
         for message in messages {
             for userID in message.readBy where map[userID] == nil {
                 if let cached = userProfiles[userID] {
                     map[userID] = cached
                 } else {
-                    attemptedProfileFetches.insert(userID)
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        do {
-                            let profile = try await self.profileService.fetchUserProfile(userID: userID)
-                            self.userProfiles[userID] = profile
-                            self.readReceiptProfiles[userID] = profile
-                        } catch {
-                            print("[ChatViewModel] Failed to fetch read receipt profile for \(userID): \(error)")
-                        }
-                    }
+                    missing.insert(userID)
                 }
             }
         }
-        readReceiptProfiles = map
+        applyReadReceiptProfiles(map)
+        if !missing.isEmpty {
+            loadProfilesIfNeeded(for: missing)
+        }
+    }
+
+    private func applyDisplayItems(_ items: [MessageDisplayItem]) {
+        let previousIDs = displayItems.map(\.id)
+        let newIDs = items.map(\.id)
+        displayItems = items
+        if previousIDs != newIDs {
+            displayItemsVersion &+= 1
+        }
+    }
+
+    private func applyReadReceiptProfile(_ profile: UserProfile, for userID: String) {
+        var updated = readReceiptProfiles
+        updated[userID] = profile
+        applyReadReceiptProfiles(updated)
+    }
+
+    private func applyReadReceiptProfiles(_ profiles: [String: UserProfile]) {
+        guard shouldUpdateReadReceipts(with: profiles) else { return }
+        readReceiptProfiles = profiles
+        readReceiptVersion &+= 1
+    }
+
+    private func shouldUpdateReadReceipts(with newProfiles: [String: UserProfile]) -> Bool {
+        let currentKeys = Set(readReceiptProfiles.keys)
+        let newKeys = Set(newProfiles.keys)
+        if currentKeys != newKeys {
+            return true
+        }
+        for key in newKeys {
+            guard let current = readReceiptProfiles[key], let updated = newProfiles[key] else { continue }
+            if current.displayName != updated.displayName ||
+                current.photoVersion != updated.photoVersion ||
+                current.profilePictureURL != updated.profilePictureURL {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func seedProfilesFromCache(for userIDs: Set<String>) {
+        let missing = userIDs.subtracting(userProfiles.keys)
+        guard !missing.isEmpty else { return }
+
+        let ids = Array(missing)
+        let descriptor = FetchDescriptor<UserEntity>(
+            predicate: #Predicate { ids.contains($0.id) }
+        )
+
+        guard let entities = try? modelContext.fetch(descriptor) else { return }
+
+        for entity in entities {
+            let profile = userProfile(from: entity)
+            userProfiles[entity.id] = profile
+        }
+    }
+
+    private func relevantProfileIDs() -> Set<String> {
+        var ids = Set(conversation?.participantIDs ?? [])
+        ids.remove(currentUserID)
+
+        for message in messages {
+            if message.senderID != currentUserID {
+                ids.insert(message.senderID)
+            }
+            for reader in message.readBy where reader != currentUserID {
+                ids.insert(reader)
+            }
+        }
+        return ids
+    }
+
+    private func prefetchRelevantProfiles() {
+        profilePrefetchTask?.cancel()
+        let ids = relevantProfileIDs()
+        guard !ids.isEmpty else {
+            updateReadReceiptProfiles()
+            return
+        }
+
+        profilePrefetchTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var needsRegroup = false
+
+            for id in ids {
+                do {
+                    let profile = try await profileService.fetchUserProfile(userID: id)
+                    let existing = userProfiles[id]
+                    userProfiles[id] = profile
+                    if existing == nil ||
+                        existing?.displayName != profile.displayName ||
+                        existing?.profilePictureURL != profile.profilePictureURL ||
+                        existing?.photoVersion != profile.photoVersion {
+                        needsRegroup = true
+                    }
+                } catch {
+                    print("[ChatViewModel] Failed to prefetch profile for \(id): \(error)")
+                }
+            }
+
+            if needsRegroup {
+                regroupMessages()
+            }
+            attemptedProfileFetches.formUnion(ids)
+            updateReadReceiptProfiles()
+        }
+    }
+
+    private func userProfile(from entity: UserEntity) -> UserProfile {
+        UserProfile(
+            id: entity.id,
+            displayName: entity.displayName,
+            email: entity.email,
+            profilePictureURL: entity.profilePictureURL,
+            onlineStatus: entity.onlineStatus,
+            lastSeen: entity.lastSeen,
+            fcmToken: entity.fcmToken,
+            photoVersion: entity.photoVersion ?? 0
+        )
     }
 
     func loadMediaData(from urlString: String, type: MessageMediaType) async throws -> Data {

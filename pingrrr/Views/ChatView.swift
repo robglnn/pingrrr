@@ -19,6 +19,8 @@ struct ChatView: View {
     @State private var showMediaSheet = false
     @State private var showMediaPreview = false
     @State private var showVoiceWarning = false
+    @State private var scrollProxy: ScrollViewProxy?
+    @State private var pendingScrollWorkItem: DispatchWorkItem?
 
     init(conversation: ConversationEntity, currentUserID: String, modelContext: ModelContext, appServices: AppServices) {
         self.conversation = conversation
@@ -79,7 +81,10 @@ struct ChatView: View {
                     onSend: {
                         Task {
                             await viewModel.sendPendingMedia()
-                            await MainActor.run { showMediaPreview = false }
+                            await MainActor.run {
+                                showMediaPreview = false
+                                scrollToBottom(delayed: true)
+                            }
                         }
                     },
                     onCancel: {
@@ -103,6 +108,9 @@ struct ChatView: View {
         }
     }
 
+    private let bottomAnchorID = "chatBottomAnchor"
+    private let bottomScrollPadding: CGFloat = 10
+
     private var messagesList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -120,29 +128,47 @@ struct ChatView: View {
                         )
                         .id(item.id)
                     }
+                    Color.clear
+                        .frame(height: bottomScrollPadding)
+                        .id(bottomAnchorID)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 12)
             }
             .background(Color.black)
-            .onChange(of: viewModel.displayItems.count) { _, _ in
+            .onAppear {
+                scrollProxy = proxy
+                scrollToBottom(proxy: proxy, delayed: true, animated: false)
+            }
+            .onChange(of: viewModel.displayItemsVersion) { _, _ in
                 scrollToBottom(proxy: proxy, delayed: true)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func scrollToBottom(proxy: ScrollViewProxy, delayed: Bool) {
-        guard let lastID = viewModel.displayItems.last?.id else { return }
+    private func scrollToBottom(proxy explicitProxy: ScrollViewProxy? = nil, delayed: Bool, animated: Bool = true) {
+        let proxy = explicitProxy ?? scrollProxy
+        guard let proxy else { return }
+
         let executeScroll = {
-            withAnimation(.easeOut) {
-                proxy.scrollTo(lastID, anchor: .bottom)
+            if animated {
+                withAnimation(.easeOut) {
+                    proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
             }
         }
 
         if delayed {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: executeScroll)
+            pendingScrollWorkItem?.cancel()
+            let workItem = DispatchWorkItem(block: executeScroll)
+            pendingScrollWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
         } else {
+            pendingScrollWorkItem?.cancel()
+            pendingScrollWorkItem = nil
             DispatchQueue.main.async(execute: executeScroll)
         }
     }
@@ -200,6 +226,7 @@ struct ChatView: View {
                         Task {
                             if await viewModel.stopVoiceRecording() {
                                 await viewModel.sendCurrentVoiceRecording()
+                                await MainActor.run { scrollToBottom(delayed: true) }
                             }
                         }
                     }
@@ -247,6 +274,7 @@ struct ChatView: View {
                                 await viewModel.sendMessage()
                                 await MainActor.run {
                                     inputFocused = false
+                                    scrollToBottom(delayed: true)
                                 }
                             }
                         }
