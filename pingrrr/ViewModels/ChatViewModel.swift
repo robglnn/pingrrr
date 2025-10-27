@@ -65,6 +65,8 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var autoTranslateNativeLanguage: TranslationLanguage = TranslationLanguage.supported.first(where: { $0.code == "en" }) ?? TranslationLanguage.supported.first!
     @Published private(set) var autoTranslateTargetLanguage: TranslationLanguage = TranslationLanguage.supported.first(where: { $0.code == "es" }) ?? TranslationLanguage.supported.first!
     @Published private(set) var autoTranslateActivatedAt: Date?
+    @Published private(set) var smartReplies: [String: SmartReplySuggestion] = [:]
+    @Published private(set) var accessoryVersion: Int = 0
 
     private var translationCache: [String: String] = [:]
     private var translationVisibility: [String: Bool] = [:]
@@ -211,19 +213,106 @@ final class ChatViewModel: ObservableObject {
         autoTranslateEnabled
     }
 
-    func translationForDisplay(of message: MessageEntity) -> MessageAutoTranslation? {
-        guard autoTranslateEnabled else { return nil }
-
+    func translationForDisplay(of message: MessageEntity, isCurrentUser _: Bool) -> MessageAutoTranslation? {
         if let personal = message.autoTranslations[currentUserID] {
             return personal
         }
 
-        if let broadcast = message.autoTranslations[Self.broadcastTranslationKey],
-           broadcast.targetLanguageCode == autoTranslateNativeLanguage.code {
+        if let broadcast = message.autoTranslations[Self.broadcastTranslationKey] {
             return broadcast
         }
 
         return nil
+    }
+
+    func smartReply(for messageID: String) -> SmartReplySuggestion? {
+        smartReplies[messageID]
+    }
+
+    func generateSmartReply(for messageID: String?) async {
+        guard let messageID,
+              let message = messages.first(where: { $0.id == messageID }) else { return }
+
+        await markBusy(true, for: messageID)
+        defer { Task { await self.markBusy(false, for: messageID) } }
+
+        let homeLanguage = autoTranslateNativeLanguage
+        let targetLanguage = autoTranslateTargetLanguage
+
+        do {
+            let first = try await fetchSmartReplyBaseText()
+
+            guard !first.isEmpty else { return }
+
+            var translated = first
+            if targetLanguage.code != homeLanguage.code {
+                translated = try await AIService.shared.translate(
+                    text: first,
+                    targetLang: targetLanguage.code,
+                    formality: aiPreferences.defaultFormality
+                )
+            }
+
+            let suggestion = SmartReplySuggestion(
+                homeLanguage: homeLanguage,
+                targetLanguage: targetLanguage,
+                homeText: first,
+                translatedText: translated
+            )
+
+            await MainActor.run {
+                self.smartReplies[messageID] = suggestion
+            self.bumpAccessoryVersion()
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func fetchSmartReplyBaseText() async throws -> String {
+        do {
+            let replies = try await AIService.shared.smartReplies(
+                conversationID: conversationID,
+                lastN: 10,
+                count: 1,
+                includeFullHistory: false
+            )
+            if let first = replies.first?.trimmingCharacters(in: .whitespacesAndNewlines), !first.isEmpty {
+                return first
+            }
+        } catch {
+            // Fall back to assistant reply if smart replies endpoint rejects the request.
+            let prompt = "Provide a short reply in the speaker's style for the latest message."
+            let assistant = try await AIService.shared.assistantReply(
+                prompt: prompt,
+                conversationID: conversationID,
+                lastN: 10,
+                includeFullHistory: false
+            )
+            let trimmed = assistant.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+            throw error
+        }
+
+        // If no suggestion returned, throw to allow caller to surface error.
+        throw AIServiceError.invalidResponse
+    }
+
+    func sendSmartReply(for messageID: String) async {
+        guard let suggestion = smartReplies[messageID] else { return }
+        await send(request: .text(suggestion.translatedText), skipAutoTranslation: true)
+        await MainActor.run {
+            self.smartReplies.removeValue(forKey: messageID)
+            self.bumpAccessoryVersion()
+        }
+    }
+
+    private func bumpAccessoryVersion() {
+        accessoryVersion &+= 1
     }
 
     func toggleTranslation(for messageID: String?) async {
@@ -258,6 +347,7 @@ final class ChatViewModel: ObservableObject {
             message.translatedContent = cached
             translationVisibility[message.id] = true
             regroupMessages()
+            bumpAccessoryVersion()
             return
         }
 
@@ -271,6 +361,7 @@ final class ChatViewModel: ObservableObject {
             message.translatedContent = translated
             translationVisibility[message.id] = true
             regroupMessages()
+            bumpAccessoryVersion()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -292,6 +383,7 @@ final class ChatViewModel: ObservableObject {
             )
             aiInsights[message.id] = AIInsight(type: .slang, content: explanation)
             regroupMessages()
+            bumpAccessoryVersion()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -314,6 +406,7 @@ final class ChatViewModel: ObservableObject {
             )
             aiInsights[message.id] = AIInsight(type: .culture, content: hint)
             regroupMessages()
+            bumpAccessoryVersion()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -338,6 +431,7 @@ final class ChatViewModel: ObservableObject {
             )
             aiInsights[message.id] = AIInsight(type: .formality, content: adjusted)
             regroupMessages()
+            bumpAccessoryVersion()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -451,7 +545,7 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func send(request: MessageRequest) async {
+    private func send(request: MessageRequest, skipAutoTranslation: Bool = false) async {
         guard let conversation else { return }
 
         let tempID = UUID().uuidString
@@ -477,7 +571,7 @@ final class ChatViewModel: ObservableObject {
                 errorMessage = error.localizedDescription
                 return
             }
-        } else if case let .text(text) = request, autoTranslateEnabled {
+        } else if case let .text(text) = request, autoTranslateEnabled && !skipAutoTranslation {
             isAIProcessingTranslation = true
             defer { isAIProcessingTranslation = false }
             do {
@@ -502,7 +596,7 @@ final class ChatViewModel: ObservableObject {
             nextRetryTimestamp: nil,
             mediaURL: optimisticMediaURL,
             mediaType: optimisticMediaType,
-            autoTranslations: outgoingTranslations
+            autoTranslations: skipAutoTranslation ? [:] : outgoingTranslations
         )
         optimisticMessage.voiceDuration = optimisticDuration
 
@@ -780,6 +874,7 @@ final class ChatViewModel: ObservableObject {
                 message.autoTranslations[self.currentUserID] = payload
                 try? self.modelContext.save()
                 self.regroupMessages()
+                self.bumpAccessoryVersion()
                 await self.persistAutoTranslation(payload, for: message, key: self.currentUserID)
             } catch {
                 if !Task.isCancelled {
@@ -1275,6 +1370,14 @@ final class ChatViewModel: ObservableObject {
 
         let type: InsightType
         let content: String
+    }
+
+    struct SmartReplySuggestion: Identifiable {
+        let id = UUID()
+        let homeLanguage: TranslationLanguage
+        let targetLanguage: TranslationLanguage
+        let homeText: String
+        let translatedText: String
     }
 
     private func markBusy(_ busy: Bool, for messageID: String) async {

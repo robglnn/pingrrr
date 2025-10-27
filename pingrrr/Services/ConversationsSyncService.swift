@@ -297,12 +297,14 @@ final class ConversationsSyncService {
             preference = newPreference
         }
 
-        if let remote = record.translationPreferences?[currentUserID] {
-            preference.autoTranslateEnabled = remote.enabled ?? false
-            preference.nativeLanguageCode = remote.native
-            preference.targetLanguageCode = remote.target
-            preference.autoTranslateActivatedAt = remote.activatedAt
-        } else {
+        guard let preferences = record.translationPreferences else { return }
+
+        if let remote = preferences[currentUserID] {
+            preference.autoTranslateEnabled = remote.enabled ?? preference.autoTranslateEnabled
+            preference.nativeLanguageCode = remote.native ?? preference.nativeLanguageCode
+            preference.targetLanguageCode = remote.target ?? preference.targetLanguageCode
+            preference.autoTranslateActivatedAt = remote.activatedAt ?? preference.autoTranslateActivatedAt
+        } else if preferences.keys.contains(currentUserID) {
             preference.autoTranslateEnabled = false
             preference.autoTranslateActivatedAt = nil
         }

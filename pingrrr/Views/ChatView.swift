@@ -129,6 +129,9 @@ struct ChatView: View {
             .onChange(of: viewModel.displayItemsVersion) { _, _ in
                 scrollToBottom(proxy: proxy, delayed: true)
             }
+            .onChange(of: viewModel.accessoryVersion) { _, _ in
+                scrollToBottom(proxy: proxy, delayed: true)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -420,6 +423,9 @@ private struct MessageRowView: View {
                     Button("Adjust Tone") {
                         Task { await viewModel.adjustTone(for: item.id) }
                     }
+                    Button("Smart Reply") {
+                        Task { await viewModel.generateSmartReply(for: item.id) }
+                    }
                     if item.insight != nil {
                         Button("Remove Insight") {
                             viewModel.removeInsight(for: item.id)
@@ -446,6 +452,9 @@ private struct MessageRowView: View {
                 translationBlock(text: manual, label: "Translated")
             } else if let auto = autoTranslationPayload {
                 translationBlock(text: auto.text, label: translationLabel(for: auto))
+            }
+            if let reply = viewModel.smartReply(for: item.message.id) {
+                smartReplyBlock(reply)
             }
         }
     }
@@ -489,7 +498,7 @@ private struct MessageRowView: View {
     }
 
     private var autoTranslationPayload: MessageAutoTranslation? {
-        viewModel.translationForDisplay(of: item.message)
+        viewModel.translationForDisplay(of: item.message, isCurrentUser: item.isCurrentUser)
     }
 
     private var manualTranslationText: String? {
@@ -516,6 +525,47 @@ private struct MessageRowView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func smartReplyBlock(_ suggestion: ChatViewModel.SmartReplySuggestion) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            translationBlock(
+                text: suggestion.homeText,
+                label: "Smart Reply (\(suggestion.homeLanguage.name))"
+            )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Send in \(suggestion.targetLanguage.name)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 12) {
+                    Text(suggestion.translatedText)
+                        .font(.body)
+                        .foregroundStyle(.blue)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        guard !isSendingSmartReply else { return }
+                        isSendingSmartReply = true
+                        Task {
+                            await viewModel.sendSmartReply(for: item.message.id)
+                            await MainActor.run { isSendingSmartReply = false }
+                        }
+                    } label: {
+                        Image(systemName: isSendingSmartReply ? "hourglass" : "paperplane.fill")
+                            .font(.body)
+                            .padding(8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .disabled(isSendingSmartReply || viewModel.isSending)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.blue.opacity(0.15), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -617,6 +667,7 @@ private struct MessageRowView: View {
     }
 
     @State private var showReceipts = false
+    @State private var isSendingSmartReply = false
 
     private var readReceiptEntries: [ReadReceiptEntry] {
         guard item.isCurrentUser else { return [] }

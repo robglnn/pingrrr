@@ -3,8 +3,8 @@ import * as functions from 'firebase-functions';
 import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
 
-const DAILY_USAGE_LIMIT_FREE = 100;
-const DAILY_USAGE_LIMIT_PRO = 100;
+const DAILY_USAGE_LIMIT_FREE = 300;
+const DAILY_USAGE_LIMIT_PRO = 300;
 const DEFAULT_TIER = 'free';
 
 interface ConversationMessageData {
